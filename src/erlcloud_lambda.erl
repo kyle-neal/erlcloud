@@ -18,6 +18,7 @@
          get_event_source_mapping/1, get_event_source_mapping/2,
          get_function/1, get_function/2, get_function/3,
          get_function_configuration/1, get_function_configuration/2, get_function_configuration/3,
+         invoke/1, invoke/2, invoke/3, invoke/4, invoke/5,
          list_aliases/1, list_aliases/2, list_aliases/4, list_aliases/5,
          list_event_source_mappings/2, list_event_source_mappings/4, list_event_source_mappings/5,
          list_functions/0, list_functions/2, list_functions/3,
@@ -26,12 +27,13 @@
          update_alias/2, update_alias/4, update_alias/5,
          update_event_source_mapping/4, update_event_source_mapping/5,
          update_function_code/3, update_function_code/4,
-         update_function_configuration/6, update_function_configuration/7]).
+         update_function_configuration/3, update_function_configuration/6, update_function_configuration/7]).
 
--type(runtime()     :: 'nodejs' | 'java8' | 'python2.7').
+-type(runtime()     :: 'nodejs' | 'nodejs4.3' | 'nodejs6.10' | 'nodejs8.10' | 'java8' |
+    'python2.7' | 'python3.6' | 'dotnetcore1.0' | 'dotnetcore2.0' | 'dotnetcore2.1' | 'nodejs4.3-edge' | 'go1.x').
 -type(return_val()  :: any()).
 
-
+-import(erlcloud_util, [filter_undef/1]).
 
 %%------------------------------------------------------------------------------
 %% Library initialization.
@@ -65,25 +67,18 @@ new(AccessKeyID, SecretAccessKey, Host, Port) ->
       }.
 
 -spec configure(string(), string()) -> ok.
-
 configure(AccessKeyID, SecretAccessKey) ->
-    put(aws_config, new(AccessKeyID, SecretAccessKey)),
-    ok.
+    erlcloud_config:configure(AccessKeyID, SecretAccessKey, fun new/2).
 
 -spec configure(string(), string(), string()) -> ok.
-
 configure(AccessKeyID, SecretAccessKey, Host) ->
-    put(aws_config, new(AccessKeyID, SecretAccessKey, Host)),
-    ok.
+    erlcloud_config:configure(AccessKeyID, SecretAccessKey, Host, fun new/3).
 
 -spec configure(string(), string(), string(), non_neg_integer()) -> ok.
-
 configure(AccessKeyID, SecretAccessKey, Host, Port) ->
-    put(aws_config, new(AccessKeyID, SecretAccessKey, Host, Port)),
-    ok.
+    erlcloud_config:configure(AccessKeyID, SecretAccessKey, Host, Port, fun new/4).
 
-default_config() ->
-    erlcloud_aws:default_config().
+default_config() -> erlcloud_aws:default_config().
 
 %%------------------------------------------------------------------------------
 %% CreateAlias
@@ -169,9 +164,9 @@ create_event_source_mapping(EventSourceArn, FunctionName,
 %%
 %%------------------------------------------------------------------------------
 -spec create_function(Code         :: erlcloud_lambda_code(),
-                            FunctionName :: string(),
-                            Handler      :: string(),
-                            Role         :: string(),
+                            FunctionName :: binary(),
+                            Handler      :: binary(),
+                            Role         :: binary(),
                             Runtime      :: runtime(),
                             Options      :: proplist()) -> return_val().
 create_function(#erlcloud_lambda_code{} = Code,
@@ -180,9 +175,9 @@ create_function(#erlcloud_lambda_code{} = Code,
                     Runtime, Options, default_config()).
 
 -spec create_function(Code         :: erlcloud_lambda_code(),
-                            FunctionName :: string(),
-                            Handler      :: string(),
-                            Role         :: string(),
+                            FunctionName :: binary(),
+                            Handler      :: binary(),
+                            Role         :: binary(),
                             Runtime      :: runtime(),
                             Options      :: proplist(),
                             Config       :: aws_config()) -> return_val().
@@ -293,7 +288,7 @@ get_function(FunctionName, Config) ->
     get_function(FunctionName, undefined, Config).
 
 -spec get_function(FunctionName :: binary(),
-                   Qualifier    :: binary(),
+                   Qualifier    :: undefined | binary(),
                    Config       :: aws_config()) -> return_val().
 get_function(FunctionName, Qualifier, Config) ->
     Path = base_path() ++ "functions/" ++ binary_to_list(FunctionName),
@@ -326,6 +321,65 @@ get_function_configuration(Function, Qualifier, Config) ->
     QParams = filter_undef([{"Qualifier", Qualifier}]),
     lambda_request(Config, get, Path, undefined, QParams).
 
+
+%%------------------------------------------------------------------------------
+%% @doc
+%% Lambda API:
+%% [http://docs.aws.amazon.com/lambda/latest/dg/API_Invoke.html]
+%%
+%% option {show_headers, true|false} may be used for invoking Lambdas
+%% this option changes returned spec of successfull Lambda invocation
+%%      false(default): output spec is {ok, Data}
+%%      true: output spec is {ok, Headers, Data} where additional headers of
+%%            Lambda invocation is returned
+%%
+%%
+%% ===Examples===
+%% Async invoke with no logs and empty event
+%% erlcloud_lambda:invoke(<<"my_lambda">>, [],
+%%    [{"X-Amz-Invocation-Type", "Event"}, {"X-Amz-Log-Type", "None"}], AwsCfg).
+%% Sync invoke returned invocation headers (contains logs)
+%% erlcloud_lambda:invoke(<<"my_lambda">>, [],
+%%    [{show_headers, true}, {"X-Amz-Log-Type", "Tail"},
+%%    {"X-Amz-Invocation-Type", "RequestResponse"}], AwsCfg).
+%%
+%%
+%%-----------------------------------------------------------------------------
+-spec invoke(FunctionName :: binary()) -> return_val().
+invoke(FunctionName) ->
+  invoke(FunctionName, default_config()).
+
+-spec invoke(FunctionName :: binary(),
+             Config :: aws_config() | list()) -> return_val().
+invoke(FunctionName, Config = #aws_config{}) ->
+    invoke(FunctionName, [], Config);
+invoke(FunctionName, Payload) when is_list(Payload)->
+    invoke(FunctionName, Payload, default_config()).
+
+-spec invoke(FunctionName :: binary(),
+             Payload :: list() | binary(),
+             Config  :: aws_config() | binary()) -> return_val().
+invoke(FunctionName, Payload, ConfigOrQualifier) when is_list(Payload)->
+    invoke(FunctionName, Payload, [], ConfigOrQualifier).
+
+-spec invoke(FunctionName :: binary(),
+             Payload :: list() | binary(),
+             Options :: list(),
+             Config  :: aws_config() | binary()) -> return_val().
+invoke(FunctionName, Payload, Options, Config = #aws_config{}) ->
+    invoke(FunctionName, Payload, Options, undefined, Config);
+invoke(FunctionName, Payload, Options, Qualifier) when is_binary(Qualifier) ->
+    invoke(FunctionName, Payload, Options, Qualifier, default_config()).
+
+-spec invoke(FunctionName :: binary(),
+             Payload   :: list() | binary(),
+             Options   :: list(),
+             Qualifier :: binary()| undefined,
+             Config    :: aws_config()) -> return_val().
+invoke(FunctionName, Payload, Options, Qualifier, Config = #aws_config{}) ->
+    Path = base_path() ++ "functions/" ++ binary_to_list(FunctionName) ++ "/invocations",
+    QParams = filter_undef([{"Qualifier", Qualifier}]),
+    lambda_request(Config, post, Path, Options, Payload, QParams).
 
 %%------------------------------------------------------------------------------
 %% ListAliases
@@ -430,8 +484,8 @@ list_functions() ->
 list_functions(Marker, MaxItems) ->
     list_functions(Marker, MaxItems, default_config()).
 
--spec list_functions(Marker   :: binary(),
-                     MaxItems :: integer(),
+-spec list_functions(Marker   :: undefined | binary(),
+                     MaxItems :: undefined | integer(),
                      Config   :: aws_config()) -> return_val().
 list_functions(Marker, MaxItems, Config) ->
     Path = base_path() ++ "functions/",
@@ -635,13 +689,21 @@ update_function_configuration(FunctionName, Description,
                                     Config       :: aws_config()) -> return_val().
 update_function_configuration(FunctionName, Description, Handler,
                               MemorySize, Role, Timeout, Config) ->
+    Configuration = [{<<"Description">>, Description},
+                     {<<"Handler">>, Handler},
+                     {<<"MemorySize">>, MemorySize},
+                     {<<"Role">>, Role},
+                     {<<"Timeout">>, Timeout}],
+    update_function_configuration(FunctionName, Configuration, Config).
+
+-spec update_function_configuration(FunctionName :: binary(),
+    Configuration :: list(tuple()), % JSX json object
+    Config       :: aws_config()) -> return_val().
+update_function_configuration(FunctionName, Configuration, Config) when is_list(Configuration) ->
     Path = base_path() ++ "functions/" ++ binary_to_list(FunctionName) ++ "/configuration",
-    Json = filter_undef([{<<"Description">>, Description},
-                         {<<"Handler">>, Handler},
-                         {<<"MemorySize">>, MemorySize},
-                         {<<"Role">>, Role},
-                         {<<"Timeout">>, Timeout}]),
+    Json = filter_undef(Configuration),
     lambda_request(Config, put, Path, Json).
+
 %%------------------------------------------------------------------------------
 %% Utility Functions
 %%------------------------------------------------------------------------------
@@ -656,38 +718,52 @@ from_record(#erlcloud_lambda_code{s3Bucket        = S3Bucket,
             {<<"ZipFile">>, ZipFile}],
     filter_undef(List).
 
-filter_undef(List) ->
-    lists:filter(fun({_Name, Value}) -> Value =/= undefined end, List).
-
 base_path() ->
     "/" ++ ?API_VERSION ++ "/".
 
 lambda_request(Config, Method, Path, Body) ->
-    lambda_request(Config, Method, Path, Body, []).
+    lambda_request(Config, Method, Path, [], Body, []).
+lambda_request(Config, Method, Path, Body, QParams) ->
+    lambda_request(Config, Method, Path, [], Body, QParams).
 
-lambda_request(Config, Method, Path, Body, QParam) ->
+lambda_request(Config, Method, Path, Options, Body, QParam) ->
     case erlcloud_aws:update_config(Config) of
         {ok, Config1} ->
-            lambda_request_no_update(Config1, Method, Path, Body, QParam);
+            lambda_request_no_update(Config1, Method, Path, Options, Body, QParam);
         {error, Reason} ->
             {error, Reason}
     end.
 
-lambda_request_no_update(Config, Method, Path, Body, QParam) ->
+lambda_request_no_update(Config, Method, Path, Options, Body, QParam) ->
     Form = case encode_body(Body) of
                <<>>   -> erlcloud_http:make_query_string(QParam);
                Value  -> Value
            end,
-    Headers = headers(Method, Path, Config, encode_body(Body), QParam),
-    case erlcloud_aws:aws_request_form_raw(
+    ShowRespHeaders = proplists:get_value(show_headers, Options, false),
+    RawBody = proplists:get_value(raw_response_body, Options, false),
+    Hdrs0 = proplists:delete(show_headers, Options),
+    Hdrs = proplists:delete(raw_response_body, Hdrs0),
+    Headers = headers(Method, Path, Hdrs, Config, encode_body(Body), QParam),
+    case erlcloud_aws:do_aws_request_form_raw(
            Method, Config#aws_config.lambda_scheme, Config#aws_config.lambda_host,
-           Config#aws_config.lambda_port, Path, Form, Headers, Config) of
-        {ok, Data} ->
-            {ok, jsx:decode(Data)};
+           Config#aws_config.lambda_port, Path, Form, Headers, Config, ShowRespHeaders) of
+        {ok, RespHeaders, RespBody} ->
+            {ok, RespHeaders, decode_body(RespBody, RawBody)};
+        {ok, RespBody} ->
+            {ok, decode_body(RespBody, RawBody)};
         E ->
             E
     end.
 
+decode_body(Body, true) ->
+    Body;
+decode_body(<<>>, _RawBody) ->
+    [];
+decode_body(BinData, _RawBody) ->
+    jsx:decode(BinData, [{return_maps, false}]).
+
+encode_body(Bin) when is_binary(Bin) ->
+    Bin;
 encode_body(undefined) ->
     <<>>;
 encode_body([]) ->
@@ -695,9 +771,9 @@ encode_body([]) ->
 encode_body(Body) ->
     jsx:encode(Body).
 
-headers(Method, Uri, Config, Body, QParam) ->
+headers(Method, Uri, Hdrs, Config, Body, QParam) ->
     Headers = [{"host", Config#aws_config.lambda_host},
-               {"content-type", "application/json"}],
+               {"content-type", "application/json"} | Hdrs],
     Region = erlcloud_aws:aws_region_from_host(Config#aws_config.lambda_host),
     erlcloud_aws:sign_v4(Method, Uri, Config,
                          Headers, Body, Region, "lambda", QParam).

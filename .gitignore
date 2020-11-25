@@ -10,6 +10,8 @@ ebin/*.app
 .eunit/
 .rebar/
 rebar
+rebar3
+.rebar3
 *.sublime-*
 deps/
 doc/
@@ -19,3 +21,4 @@ eunit.coverage.xml
 ercloud.iml
 *[#]*[#]
 *[#]*
+.dialyzer_plt

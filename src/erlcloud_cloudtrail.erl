@@ -11,8 +11,9 @@
     %% Users
     create_trail/3, create_trail/4, create_trail/5, create_trail/6,
     delete_trail/1, delete_trail/2,
-    describe_trails/0, describe_trails/1, describe_trails/2,
+    describe_trails/0, describe_trails/1, describe_trails/2, describe_trails/3,
     get_trail_status/1, get_trail_status/2,
+    get_event_selectors/1, get_event_selectors/2,
     start_logging/1, start_logging/2,
     stop_logging/1, stop_logging/2,
     update_trail/4, update_trail/5, update_trail/6,
@@ -40,13 +41,11 @@ new(AccessKeyID, SecretAccessKey, Host) ->
 
 -spec configure(string(), string()) -> ok.
 configure(AccessKeyID, SecretAccessKey) ->
-    put(aws_config, new(AccessKeyID, SecretAccessKey)),
-    ok.
+    erlcloud_config:configure(AccessKeyID, SecretAccessKey, fun new/2).
 
 -spec configure(string(), string(), string()) -> ok.
 configure(AccessKeyID, SecretAccessKey, Host) ->
-    put(aws_config, new(AccessKeyID, SecretAccessKey, Host)),
-    ok.
+    erlcloud_config:configure(AccessKeyID, SecretAccessKey, Host, fun new/3).
 
 %%
 %% API
@@ -97,47 +96,60 @@ delete_trail(Trail, Config) ->
 -spec describe_trails() -> ct_return().
 describe_trails() -> describe_trails([]).
 
--spec describe_trails(aws_config()) -> ct_return().
+-spec describe_trails([] | aws_config()) -> ct_return().
 describe_trails(Config) when is_record(Config, aws_config) ->
     describe_trails([], Config);
 
-%% It appears that CloudTrail API doesn't honor TrailNameList parameter.
-%% TODO: Open a ticket with AWS.
 describe_trails(Trails) ->
     describe_trails(Trails, default_config()).
 
 -spec describe_trails([string()], aws_config()) -> ct_return().
-describe_trails([], Config) ->
-    ct_request("DescribeTrails", [], Config);
-
 describe_trails(Trails, Config) ->
-    %% Json = [{<<"TrailNameList">>, jsx:encode(list_to_binary([Trails]))}],
-    Json = [{<<"TrailNameList">>, [list_to_binary(T) || T <- Trails]}],
+    Json = trail_name_list(Trails),
     ct_request("DescribeTrails", Json, Config).
 
--spec get_trail_status([string()] ) -> ct_return().
+-spec describe_trails([string()], boolean(), aws_config()) -> ct_return().
+describe_trails(Trails, IncludeShadowTrails, Config) ->
+    TrailNameList = trail_name_list(Trails),
+    Json =
+        case IncludeShadowTrails of
+            true -> TrailNameList;
+            false -> [{<<"includeShadowTrails">>, false} | TrailNameList]
+        end,
+    ct_request("DescribeTrails", Json, Config).
+
+-spec get_trail_status(string() ) -> ct_return().
 get_trail_status(Trail) ->
     get_trail_status(Trail, default_config()).
 
--spec get_trail_status([string()], aws_config()) -> ct_return().
+-spec get_trail_status(string(), aws_config()) -> ct_return().
 get_trail_status(Trail, Config) ->
     Json = [{<<"Name">>, list_to_binary(Trail)}],
     ct_request("GetTrailStatus", Json, Config).
 
--spec start_logging([string()] ) -> ct_return().
+-spec get_event_selectors(string()) -> ct_return().
+get_event_selectors(Trail) ->
+    get_event_selectors(Trail, default_config()).
+
+-spec get_event_selectors(string(), aws_config()) -> ct_return().
+get_event_selectors(Trail, Config) ->
+    Json = [{<<"TrailName">>, list_to_binary(Trail)}],
+    ct_request("GetEventSelectors", Json, Config).
+
+-spec start_logging(string() ) -> ct_return().
 start_logging(Trail) ->
     start_logging(Trail, default_config()).
 
--spec start_logging([string()], aws_config()) -> ct_return().
+-spec start_logging(string(), aws_config()) -> ct_return().
 start_logging(Trail, Config) ->
     Json = [{<<"Name">>, list_to_binary(Trail)}],
     ct_request("StartLogging", Json, Config).
 
--spec stop_logging([string()] ) -> ct_return().
+-spec stop_logging(string() ) -> ct_return().
 stop_logging(Trail) ->
     stop_logging(Trail, default_config()).
 
--spec stop_logging([string()], aws_config()) -> ct_return().
+-spec stop_logging(string(), aws_config()) -> ct_return().
 stop_logging(Trail, Config) ->
     Json = [{<<"Name">>, list_to_binary(Trail)}],
     ct_request("StopLogging", Json, Config).
@@ -193,13 +205,13 @@ request_impl(Method, Scheme, Host, Port, Path, Operation, Params, Body, #aws_con
        {ok, RespBody} ->
             case Config#aws_config.cloudtrail_raw_result of
                 true -> {ok, RespBody};
-                _ -> {ok, jsx:decode(RespBody)}
+                _ -> {ok, jsx:decode(RespBody, [{return_maps, false}])}
             end;
         {error, Reason} ->
             {error, Reason}
     end.
 
--spec headers(aws_config(), string(), proplist(), binary(), string()) -> headers().
+-spec headers(aws_config(), string(), proplist(), string() | binary(), string()) -> headers().
 headers(Config, Operation, _Params, Body, Service) ->
     Headers = [
                {"host", Config#aws_config.cloudtrail_host},
@@ -214,3 +226,8 @@ port_spec(#aws_config{cloudtrail_port=80}) ->
     undefined;
 port_spec(#aws_config{cloudtrail_port=Port}) ->
     Port.
+
+trail_name_list([]) ->
+    [];
+trail_name_list(Trails) ->
+    [{<<"trailNameList">>, [list_to_binary(T) || T <- Trails]}].

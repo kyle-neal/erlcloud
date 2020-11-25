@@ -51,13 +51,11 @@ new(AccessKeyID, SecretAccessKey, Host) ->
 
 -spec configure(string(), string()) -> ok.
 configure(AccessKeyID, SecretAccessKey) ->
-    put(aws_config, new(AccessKeyID, SecretAccessKey)),
-    ok.
+    erlcloud_config:configure(AccessKeyID, SecretAccessKey, fun new/2).
 
 -spec configure(string(), string(), string()) -> ok.
 configure(AccessKeyID, SecretAccessKey, Host) ->
-    put(aws_config, new(AccessKeyID, SecretAccessKey, Host)),
-    ok.
+    erlcloud_config:configure(AccessKeyID, SecretAccessKey, Host, fun new/3).
 
 default_config() -> erlcloud_aws:default_config().
 
@@ -207,8 +205,8 @@ list_domains(FirstToken, MaxDomains, Config)
   when is_list(FirstToken),
        is_integer(MaxDomains) orelse MaxDomains =:= none ->
 
-    Params = 
-    maybe_add_nexttoken(FirstToken, 
+    Params =
+    maybe_add_nexttoken(FirstToken,
     maybe_add_maxdomains(MaxDomains, [])),
 
     {Doc, Result} = sdb_request(Config, "ListDomains", Params),

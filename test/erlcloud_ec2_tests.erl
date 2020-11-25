@@ -33,11 +33,12 @@
 %%% Test entry points
 %%%===================================================================
 
-describe_tags_test_() ->
+describe_test_() ->
     {foreach,
      fun start/0,
      fun stop/1,
      [
+      fun describe_vpcs_tests/1,
       fun describe_tags_input_tests/1,
       fun describe_tags_output_tests/1,
       fun request_spot_fleet_input_tests/1,
@@ -181,6 +182,75 @@ output_tests(Fun, Tests) ->
 %%% Actual test specifiers
 %%%===================================================================
 
+describe_vpcs_tests(_) ->
+    Tests = [
+        ?_ec2_test({
+            "Describe all the vpcs",
+            "<DescribeVpcsResponse xmlns=\"http://ec2.amazonaws.com/doc/2016-11-15/\">
+                <requestId>9a0571b9-6e91-47e7-b75f-785125322853</requestId>
+                <vpcSet>
+                    <item>
+                        <vpcId>vpc-00000000000000001</vpcId>
+                        <ownerId>000000000001</ownerId>
+                        <state>available</state>
+                        <cidrBlock>10.0.0.0/16</cidrBlock>
+                        <dhcpOptionsId>dopt-00000001</dhcpOptionsId>
+                        <cidrBlockAssociationSet>
+                            <item>
+                                <cidrBlock>10.0.0.0/16</cidrBlock>
+                                <associationId>vpc-cidr-assoc-00000000000000001</associationId>
+                                <cidrBlockState>
+                                    <state>associated</state>
+                                </cidrBlockState>
+                            </item>
+                            <item>
+                                <cidrBlock>10.1.0.0/16</cidrBlock>
+                                <associationId>vpc-cidr-assoc-00000000000000002</associationId>
+                                <cidrBlockState>
+                                    <state>test state</state>
+                                    <statusMessage>test status message</statusMessage>
+                                </cidrBlockState>
+                            </item>
+                        </cidrBlockAssociationSet>
+                        <tagSet>
+                            <item>
+                                <key>Key</key>
+                                <value>Value</value>
+                            </item>
+                        </tagSet>
+                        <instanceTenancy>default</instanceTenancy>
+                        <isDefault>false</isDefault>
+                    </item>
+                </vpcSet>
+            </DescribeVpcsResponse>",
+            {ok, [
+                [
+                    {vpc_id, "vpc-00000000000000001"},
+                    {state, "available"},
+                    {cidr_block, "10.0.0.0/16"},
+                    {dhcp_options_id, "dopt-00000001"},
+                    {instance_tenancy, "default"},
+                    {is_default, false},
+                    {cidr_block_association_set, [
+                        [
+                           {cidr_block, "10.0.0.0/16"},
+                           {association_id, "vpc-cidr-assoc-00000000000000001"},
+                           {cidr_block_state, [{state, "associated"}]}
+                        ],
+                        [
+                           {cidr_block, "10.1.0.0/16"},
+                           {association_id, "vpc-cidr-assoc-00000000000000002"},
+                           {cidr_block_state, [{state, "test state"}, {status_message, "test status message"}]}
+                        ]
+                    ]},
+                    {tag_set, [
+                        [{key, "Key"}, {value, "Value"}]
+                    ]}
+                ]
+            ]}
+        })
+    ],
+    output_tests(?_f(erlcloud_ec2:describe_vpcs()), Tests).
 
 %% DescribeTags test based on the API examples:
 %% http://docs.aws.amazon.com/AWSEC2/latest/APIReference/ApiReference-query-DescribeTags.html
@@ -713,7 +783,12 @@ describe_images_tests(_) ->
          <creationDate>2016-03-26T12:00:13Z</creationDate>
          <blockDeviceMapping/>
          <virtualizationType>hvm</virtualizationType>
-         <tagSet/>
+         <tagSet>
+                <item>
+                    <key>Key</key>
+                    <value>Value</value>
+                </item>
+         </tagSet>
          <hypervisor>xen</hypervisor>
       </item>
    </imagesSet>
@@ -735,7 +810,8 @@ describe_images_tests(_) ->
           {creation_date, {{2016,3,26},{12,0,13}}},
           {platform, "windows"},
           {block_device_mapping, []},
-          {product_codes, []}
+          {product_codes, []},
+          {tag_set, [[{key,"Key"},{value, "Value"}]]}
         ]]}})],
 
   %% Remaining AWS API examples return subsets of the same data
@@ -1116,9 +1192,9 @@ describe_flow_logs_output_tests(_) ->
     ],
     output_tests(?_f(erlcloud_ec2:describe_flow_logs()), Tests).
 
-describe_instances_test() ->
+describe_instances_test_() ->
     Tests = [{30,6},{22,5},{3,7},{10,10},{0,10},{0,5},{0,1000}],
-    test_pagination(Tests, generate_instances_response, describe_instances, [], [[]])
+    {timeout, 60, fun () -> test_pagination(Tests, generate_instances_response, describe_instances, [], [[]]) end}
 .
 
 describe_instances_boundaries_test_() ->
@@ -1127,9 +1203,9 @@ describe_instances_boundaries_test_() ->
         ?_assertException(error, function_clause, erlcloud_ec2:describe_instances([], 1001, undefined))
     ].
 
-describe_snapshots_test() ->
+describe_snapshots_test_() ->
     Tests = [{30,6},{22,5},{3,7},{10,10},{0,10},{0,5},{0,1000}],
-    test_pagination(Tests, generate_snapshots_response, describe_snapshots, [], ["self", []])
+    {timeout, 60, fun () -> test_pagination(Tests, generate_snapshots_response, describe_snapshots, [], ["self", []]) end}
 .
 
 describe_snapshots_boundaries_test_() ->
@@ -1138,9 +1214,9 @@ describe_snapshots_boundaries_test_() ->
         ?_assertException(error, function_clause, erlcloud_ec2:describe_snapshots("self", [], 1001, undefined))
     ].
 
-describe_tags_test() ->
+describe_tags_test_() ->
     Tests = [{30,6},{22,5},{3,7},{10,10},{0,10},{0,5},{0,1000}],
-    test_pagination(Tests, generate_tags_response, describe_tags, [], [[]])
+    {timeout, 60, fun () -> test_pagination(Tests, generate_tags_response, describe_tags, [], [[]]) end}
 .
 
 describe_tags_boundaries_test_() ->
@@ -1148,20 +1224,21 @@ describe_tags_boundaries_test_() ->
         ?_assertException(error, function_clause, erlcloud_ec2:describe_tags([], 4, undefined)),
         ?_assertException(error, function_clause, erlcloud_ec2:describe_tags([], 1001, undefined))
     ].
-describe_spot_price_history_test() ->
+describe_spot_price_history_test_() ->
     Tests = [{30,6},{22,5},{3,7},{10,10},{0,10},{0,5},{0,1000}],
-    test_pagination(Tests, generate_spot_price_history_response, describe_spot_price_history, [], ["", "", [], ""])
+    {timeout, 60, fun () -> test_pagination(Tests, generate_spot_price_history_response, describe_spot_price_history, [], ["", "", [], ""]) end}
 .
 
+-dialyzer({nowarn_function, describe_spot_price_history_boundaries_test_/0}).
 describe_spot_price_history_boundaries_test_() ->
     [
         ?_assertException(error, function_clause, erlcloud_ec2:describe_spot_price_history(["", "", [], ""], 4, undefined)),
         ?_assertException(error, function_clause, erlcloud_ec2:describe_spot_price_history(["", "", [], ""], 1001, undefined))
     ].
 
-describe_instance_status_test() ->
+describe_instance_status_test_() ->
     Tests = [{30,6},{22,5},{3,7},{10,10},{0,10},{0,5},{0,1000}],
-    test_pagination(Tests, generate_instance_status_response, describe_instance_status, [[], []], [[], []])
+    {timeout, 60, fun () -> test_pagination(Tests, generate_instance_status_response, describe_instance_status, [[], []], [[], []]) end}
 .
 
 describe_instance_status_boundaries_test_() ->
@@ -1170,9 +1247,9 @@ describe_instance_status_boundaries_test_() ->
         ?_assertException(error, function_clause, erlcloud_ec2:describe_instance_status([], [], 1001, undefined))
     ].
 
-describe_reserved_instances_offerings_test() ->
+describe_reserved_instances_offerings_test_() ->
     Tests = [{30,6},{22,5},{3,7},{10,10},{0,10},{0,5},{0,1000}],
-    test_pagination(Tests, generate_reserved_instances_offerings_response, describe_reserved_instances_offerings, [], [[]])
+    {timeout, 60, fun () -> test_pagination(Tests, generate_reserved_instances_offerings_response, describe_reserved_instances_offerings, [], [[]]) end}
 .
 
 describe_reserved_instances_offerings_boundaries_test_() ->
@@ -1202,6 +1279,7 @@ generate_one_instance(N) ->
                 <productCodes/>
                 <instanceType>t2.small</instanceType>
                 <launchTime>2016-09-26T10:35:00.000Z</launchTime>
+                <platform/>
                 <placement>
                     <availabilityZone>us-east-1a</availabilityZone>
                     <groupName/>

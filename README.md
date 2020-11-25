@@ -21,9 +21,13 @@ Service APIs implemented:
 - Amazon Autoscaling (AS)
 - Amazon CloudTrail (CT)
 - Cloud Formation (CFN)
+- Config
 - ElasticLoadBalancing (ELB)
 - Identity and Access Management (IAM)
 - Kinesis
+- Glue (Catalog table, Crawlers and Job APIs support)
+- Athena
+- Step Functions (SF)
 - CloudWatch
 - MechanicalTurk
 - Simple DB (SDB)
@@ -32,45 +36,42 @@ Service APIs implemented:
 - Short Token Service (STS)
 - Simple Notification Service (SNS)
 - Web Application Firewall (WAF)
+- AWS Cost and Usage Report API
 - and more to come
 
-Majority of API functions have been implemented.
+The majority of API functions have been implemented.
 Not all functions have been thoroughly tested, so exercise care when integrating this library into production code.
 Please send issues and patches.
 
-The libraries can be used two ways:
-- either you can specify configuration parameters in the process dictionary. Useful for simple tasks
-- you can create a configuration object and pass that to each request as the final parameter. Useful for Cross AWS Account access
+The libraries can be used two ways.  You can
+- specify configuration parameters in the process dictionary. Useful for simple tasks, or
+- create a configuration object and pass that to each request as the final parameter. Useful for Cross AWS Account access
 
 ## Roadmap ##
 
 Below is the library roadmap update along with regular features and fixes.
 
-- 0.13.10
- * pre Alert Logic Fork merge
+- 3.0.X
+  - ~~Remove R16 support~~ __done__
+  - Support maps
 
-- 2.0.0
- Existing code
- merge of [Alert Logic](https://github.com/alertlogic/erlcloud/tree/v1.2.4) fork into upstream.
- This is a major version bump which contains lots of new features and functionality.
- Unfortunately, it also contains quite a number of low level APIs incompatibilities since the fork diverged for a long while.
- Making it backward compatible does not seem feasible and valuable at the moment.
- * No APIs have been removed and it's on branched of 0.13.10 at the moment. Any minor version delta added during notice time will be compensated before the merge.
- * intentionally jumping to 2.0.0 as AL fork has v1.X.X
-
-- 2.1.X
- * fix dialyzer findings and make it mandatory for the library
- * ~~make full support of Mix/HEX~~ done
-
-- 2.2.X
- * Further deprecation of legacy functionality
- * ~~remove R14/R15 support.~~ done
- * Only SigV4 signing and generalised in one module. Keep SigV2 in SBD section only
- * No more `erlang:error()` use and use of regular tuples as error API. Breaking change.
+- 3.X.X
+  - Fix dialyzer findings and make it mandatory for the library
+  - Only SigV4 signing and generalised in one module. Keep SigV2 in SBD section only
+  - No more `erlang:error()` use and use of regular tuples as error API. Breaking change.
 
 ### Major API compatibility changes between 0.13.X and 2.0.x
  - ELB APIs
  - ... list to be filled shortly
+
+### Supported Erlang versions
+At the moment we support the following OTP releases:
+ - 19.3
+ - 20.3
+ - 21.3
+ - 22.3
+ 
+it might still work on 17+ (primarily due to Erlang maps) but we do not guarantee that. 
 
 ## Getting started ##
 You need to clone the repository and download rebar/rebar3 (if it's not already available in your path).
@@ -94,18 +95,17 @@ application:ensure_all_started(erlcloud).
 ```
 ### Using Temporary Security Credentials
 
-The access to AWS resource might be managed through [third-party identity provider](http://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_create_for-idp.html).
-The access is managed using [temporary security credentials](http://docs.aws.amazon.com/IAM/latest/UserGuide/id_credentials_temp_use-resources.html).
+When access to AWS resources is managed through [third-party identity providers](http://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_create_for-idp.html) it is performed using [temporary security credentials](http://docs.aws.amazon.com/IAM/latest/UserGuide/id_credentials_temp_use-resources.html).
 
-You can provide your amazon credentials in OS environmental variables
+You can provide your AWS credentials in OS environment variables
 
 ```
 export AWS_ACCESS_KEY_ID=<Your AWS Access Key>
 export AWS_SECRET_ACCESS_KEY=<Your AWS Secret Access Key>
-export AWS_SECURITY_TOKEN=<Your AWS Security Token>
-export AWS_REGION=<Your region>
+export AWS_SESSION_TOKEN=<Your AWS Security Token>
+export AWS_DEFAULT_REGION=<Your region>
 ```
-If you did not provide your amazon credentials in the OS environmental variables, then you need to provide configuration read from your profile:
+If you did not provide your AWS credentials in the OS environment variables, then you need to provide configuration read from your profile:
 ```
 {ok, Conf} = erlcloud_aws:profile().
 erlcloud_s3:list_buckets(Conf).
@@ -118,12 +118,12 @@ application:set_env(erlcloud, aws_security_token, "your token"),
 application:set_env(erlcloud, aws_region, "your region"),
 ```
 ### Using Access Key ###
-You can provide your amazon credentials in environmental variables.
+You can provide your AWS credentials in environmental variables.
 ```
 export AWS_ACCESS_KEY_ID=<Your AWS Access Key>
 export AWS_SECRET_ACCESS_KEY=<Your AWS Secret Access Key>
 ```
-If you did not provide your amazon credentials in the environmental variables, then you need to provide the per-process configuration:
+If you did not provide your AWS credentials in the environment variables, then you need to provide the per-process configuration:
 ```
 erlcloud_ec2:configure(AccessKeyId, SecretAccessKey [, Hostname]).
 ```
@@ -136,8 +136,48 @@ EC2 = erlcloud_ec2:new(AccessKeyId, SecretAccessKey [, Hostname])
 erlcloud_ec2:describe_images(EC2).
 ```
 
-### Basic use ###
-Then you can start making api calls, like:
+### aws_config
+The [aws_config](https://github.com/erlcloud/erlcloud/blob/master/include/erlcloud_aws.hrl) record contains many valuable defaults,
+such as protocols and ports for AWS services. You can always redefine them by making new `#aws_config{}` record and
+changing particular fields, then passing the result to any erlcloud function.
+But if you want to change something in runtime this might be tedious and/or not flexible enough.
+
+An alternative approach is to set default fields within the `app.config -> erlcloud -> aws_config` section and
+rely on the config, used by all functions by default.
+
+Example of such app.config:
+
+```erlang
+[
+  {erlcloud, [
+      {aws_config, [
+          {s3_scheme, "http://"},
+          {s3_host, "s3.example.com"}
+      ]}
+  ]}
+].
+```
+
+### VPC endpoints
+If you want to utilise AZ affinity for VPC endpoints you can configure those in application config via:
+```erlang
+{erlcloud, [
+    {services_vpc_endpoints, [
+        {<<"sqs">>, [<<"myAZ1.sqs-dns.amazonaws.com">>, <<"myAZ2.sqs-dns.amazonaws.com">>]},
+        {<<"kinesis">>, {env, "KINESIS_VPC_ENDPOINTS"}}
+    ]}
+]}
+```
+Two options are supported:
+ - explicit list of Route53 AZ endpoints
+ - OS environment variable (handy for ECS deployments). The value of the variable should be of comma-separated string like `"myAZ1.sqs-dns.amazonaws.com,myAZ2.sqs-dns.amazonaws.com"`
+ 
+Upon config generation, `erlcloud` will check the AZ of the deployment 
+and match it to one of the pre-configured DNS records. First match is used and if not match found default is used. 
+
+
+## Basic use ##
+Then you can start making API calls, like:
 ```
 erlcloud_ec2:describe_images().
 % list buckets of Account stored in config in process dict

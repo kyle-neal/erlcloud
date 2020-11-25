@@ -49,24 +49,19 @@ new(AccessKeyID, SecretAccessKey, Host, Port, Scheme) ->
 
 -spec configure(string(), string()) -> ok.
 configure(AccessKeyID, SecretAccessKey) ->
-    put(aws_config, new(AccessKeyID, SecretAccessKey)),
-    ok.
+    erlcloud_config:configure(AccessKeyID, SecretAccessKey, fun new/2).
 
 -spec configure(string(), string(), string()) -> ok.
 configure(AccessKeyID, SecretAccessKey, Host) ->
-    put(aws_config, new(AccessKeyID, SecretAccessKey, Host)),
-    ok.
+    erlcloud_config:configure(AccessKeyID, SecretAccessKey, Host, fun new/3).
 
 -spec configure(string(), string(), string(), non_neg_integer()) -> ok.
 configure(AccessKeyID, SecretAccessKey, Host, Port) ->
-    put(aws_config, new(AccessKeyID, SecretAccessKey, Host, Port)),
-    ok.
+    erlcloud_config:configure(AccessKeyID, SecretAccessKey, Host, Port, fun new/4).
 
 -spec configure(string(), string(), string(), non_neg_integer(), string()) -> ok.
 configure(AccessKeyID, SecretAccessKey, Host, Port, Scheme) ->
-    put(aws_config, new(AccessKeyID, SecretAccessKey, Host, Port, Scheme)),
-    ok.
-
+    erlcloud_config:configure(AccessKeyID, SecretAccessKey, Host, Port, Scheme, fun new/5).
 
 %%------------------------------------------------------------------------------
 %%  ElasticMapReduce API
@@ -212,13 +207,11 @@ request_no_update(Action, Json, Scheme, Host, Port, Service, Opts, Cfg) ->
                           raw -> {ok, Body};
                           _   -> case Body of
                                      <<>> -> {ok, <<>>};
-                                     _    -> {ok, jsx:decode(Body)}
+                                     _    -> {ok, jsx:decode(Body, [{return_maps, false}])}
                                  end
                       end;
         {error, {http_error, _Code, _StatusLine, ErrBody}} ->
-            {error, {aws_error, jsx:decode(ErrBody)}};
+            {error, {aws_error, jsx:decode(ErrBody, [{return_maps, false}])}};
         {error, {socket_error, Reason}} ->
-            {error, {socket_error, Reason}};
-        {error, Unexpected} ->
-            {error, Unexpected}
+            {error, {socket_error, Reason}}
     end.

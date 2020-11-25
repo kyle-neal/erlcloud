@@ -74,6 +74,7 @@
 ]).
 
 -export_type([
+    arn/0,
     attr_name/0,
     cluster_opt/0,
     client_token_opt/0,
@@ -144,6 +145,9 @@
     maybe_list/1,
     maximum_percent_opt/0,
     minimum_healthy_percent_opt/0, 
+    placement_strategy/0,
+    placement_strategy_opt/0,
+    placement_strategy_opts/0,
     register_task_definition_opt/0,
     register_task_definition_opts/0,
     role_opt/0,
@@ -228,7 +232,7 @@ default_config() ->
 -type attr_name() :: binary() | string().
 -type arn() :: binary().
 
--type json_pair() :: {binary(), jsx:json_term()}.
+-type json_pair() :: {binary() | atom(), jsx:json_term()}.
 -type json_return() :: {ok, jsx:json_term()} | {error, term()}.
 -type ecs_return(Record) :: {ok, jsx:json_term() | Record } | {error, term()}.
 -type decode_fun() :: fun((jsx:json_term(), decode_opts()) -> tuple()).
@@ -340,7 +344,6 @@ target_group_arn_opt() ->
                               target_group_arn_opt().
 -type load_balancers_opts() :: [load_balancers_opt()].
 
--type load_balancers() :: {load_balancers, maybe_list(load_balancers_opts())}.
 -spec load_balancers_opt() -> opt_table_entry().
 load_balancers_opt() ->
     {load_balancers, <<"loadBalancers">>, fun encode_load_balancers/1}.
@@ -363,6 +366,27 @@ volume_host_opt() ->
 -spec volumes_opt() -> opt_table_entry().
 volumes_opt() ->
     {volumes, <<"volumes">>, fun encode_volumes/1}.
+
+-type placement_strategy_opt() :: placement_strategy_field_opt() |
+                                  placement_strategy_type_opt().
+-type placement_strategy_opts() :: [placement_strategy_opt()].
+
+-type placement_strategy_field_opt() :: {field, string_param()}.
+-spec placement_strategy_field_opt() -> opt_table_entry().
+placement_strategy_field_opt() ->
+    {field, <<"field">>, fun to_binary/1}.
+
+-type placement_strategy_type_opt() :: {type, string_param()}.
+-spec placement_strategy_type_opt() -> opt_table_entry().
+placement_strategy_type_opt() ->
+    {type, <<"type">>, fun to_binary/1}.
+
+-type placement_strategy() :: {placement_strategy,
+                               maybe_list(placement_strategy_opts())}.
+-spec placement_strategy_opt() -> opt_table_entry().
+placement_strategy_opt() ->
+    {placement_strategy, <<"placementStrategy">>,
+     fun encode_placement_strategy/1}.
 
 -type key_value_pair_opt() :: {name, string_param()} |
                               {value, string_param()}.
@@ -536,7 +560,7 @@ task_overrides_opt() ->
 %%%------------------------------------------------------------------------------
 %%% Shared Encoders 
 %%%------------------------------------------------------------------------------
--spec encode_deployment_configuration(deployment_configuration()) -> [json_pair()].
+-spec encode_deployment_configuration(deployment_configuration_opts()) -> [json_pair()].
 encode_deployment_configuration(Config) ->
     DeploymentConfigrationOpts = [
         maximum_percent_opt(),
@@ -546,7 +570,7 @@ encode_deployment_configuration(Config) ->
     {AwsOpts, _EcsOpts} = opts(DeploymentConfigrationOpts, Config),
     AwsOpts.
 
--spec encode_load_balancers(load_balancers()) -> [json_pair()].
+-spec encode_load_balancers(load_balancers_opts()) -> [aws_opts()].
 encode_load_balancers(Balancers) ->
     LoadBalancerOpts = [
         container_name_opt(),
@@ -562,9 +586,11 @@ encode_load_balancers(Balancers) ->
 
 -spec encode_volume_host([{source_path, string_param()}]) -> [json_pair()].
 encode_volume_host([{source_path, Path}]) ->
-    [{source_path, to_binary(Path)}].
+    [{<<"sourcePath">>, to_binary(Path)}];
+encode_volume_host([]) ->
+    [].
 
--spec encode_volumes(volumes()) -> [json_pair()].
+-spec encode_volumes(volumes_opts()) -> [aws_opts()].
 encode_volumes(Volumes) ->
     VolumesOpts = [
         volume_name_opt(),
@@ -576,19 +602,31 @@ encode_volumes(Volumes) ->
         end, 
     Volumes).
         
--spec encode_ecs_volume_from_list(ecs_volume_from_opts()) -> [json_pair()].
+-spec encode_placement_strategy(placement_strategy_opts()) -> [aws_opts()].
+encode_placement_strategy(Strategy) ->
+    StrategyOpts = [
+        placement_strategy_field_opt(),
+        placement_strategy_type_opt()
+    ],
+    lists:map(
+        fun(Volume) ->
+            {AwsOpts, _EcsOpts} = opts(StrategyOpts, Volume), AwsOpts
+        end, 
+    Strategy).
+
+-spec encode_ecs_volume_from_list(ecs_volume_from_opts()) -> [aws_opts()].
 encode_ecs_volume_from_list(VolumesFrom) ->
     encode_maybe_list(fun ecs_volume_from_opt/0, VolumesFrom).
 
--spec encode_ecs_ulimit_list(ecs_ulimit_opts()) -> [json_pair()].
+-spec encode_ecs_ulimit_list(ecs_ulimit_opts()) -> [aws_opts()].
 encode_ecs_ulimit_list(Ulimits) ->
     encode_maybe_list(fun ecs_ulimit_opt/0, Ulimits).
 
--spec encode_ecs_port_mapping_list(ecs_port_mapping_opts()) -> [json_pair()].
+-spec encode_ecs_port_mapping_list(ecs_port_mapping_opts()) -> [aws_opts()].
 encode_ecs_port_mapping_list(PortMappings) ->
     encode_maybe_list(fun ecs_port_mapping_opt/0, PortMappings).
 
--spec encode_ecs_mount_point_list(ecs_mount_point_opts()) -> [json_pair()].
+-spec encode_ecs_mount_point_list(ecs_mount_point_opts()) -> [aws_opts()].
 encode_ecs_mount_point_list(MountPoints) ->
     encode_maybe_list(fun ecs_mount_point_opt/0, MountPoints).
 
@@ -601,11 +639,11 @@ encode_log_configuration(Config) ->
     {AwsOpts, _EcsOpts} = opts(ecs_log_configuration_opts(), Config),
     AwsOpts.
 
--spec encode_ecs_host_list(ecs_host_entry_opts()) -> [json_pair()].
+-spec encode_ecs_host_list(ecs_host_entry_opts()) -> [aws_opts()].
 encode_ecs_host_list(Hosts) ->
     encode_maybe_list(fun ecs_host_entry_opt/0, Hosts).
 
--spec encode_key_value_pair_list(key_value_pair_opts()) -> [json_pair()].
+-spec encode_key_value_pair_list(key_value_pair_opts()) -> [aws_opts()].
 encode_key_value_pair_list(Pairs) ->
     encode_maybe_list(fun key_value_opt/0, Pairs).
     
@@ -640,7 +678,8 @@ container_definition_opts() ->
         {working_directory, <<"workingDirectory">>, fun to_binary/1}
     ].
 
--spec encode_container_definitions(Defs :: container_definition_opts()) -> jsx:json_term().
+-spec encode_container_definitions(Defs :: container_definition_opts()
+                                         | [container_definition_opts()]) -> [aws_opts()].
 encode_container_definitions(Defs) ->
     encode_maybe_list(fun container_definition_opts/0, Defs).
     
@@ -649,11 +688,11 @@ encode_ecs_task_overrides(Overrides) ->
     {AwsOpts, _EcsOpts} = opts(ecs_task_override_opt(), Overrides),
     AwsOpts.
 
--spec encode_ecs_container_overrides_list(ContainerOverrides :: ecs_container_override_opts()) -> jsx:json_term().
+-spec encode_ecs_container_overrides_list(ContainerOverrides :: ecs_container_override_opts()) -> [aws_opts()].
 encode_ecs_container_overrides_list(ContainerOverrides) ->
     encode_maybe_list(fun ecs_container_override_opt/0, ContainerOverrides).
 
--spec encode_maybe_list(fun((A) -> B), maybe_list(A)) -> [B].
+-spec encode_maybe_list(fun(() -> opt_table()), maybe_list(proplist())) -> [aws_opts()].
 encode_maybe_list(Fun, List) when is_list(List), is_list(hd(List)) ->
     lists:map(
         fun(Item) ->
@@ -1045,6 +1084,7 @@ task_record() ->
             {<<"createdAt">>, #ecs_task.created_at, fun id/2},
             {<<"desiredStatus">>, #ecs_task.desired_status, fun id/2},
             {<<"lastStatus">>, #ecs_task.last_status, fun id/2},
+            {<<"launchType">>, #ecs_task.launch_type, fun id/2},
             {<<"overrides">>, #ecs_task.overrides, fun decode_task_overrides/2},
             {<<"startedAt">>, #ecs_task.started_at, fun id/2},
             {<<"startedBy">>, #ecs_task.started_by, fun id/2},
@@ -1139,7 +1179,8 @@ decode_container_overrides_list(V, Opts) ->
 %%%------------------------------------------------------------------------------
 %% CreateCluster
 %%%------------------------------------------------------------------------------
--type create_cluster_opt() :: {cluster_name, string_param()}.
+-type create_cluster_opt() :: {cluster_name, string_param()} |
+                              out_opt().
 -type create_cluster_opts() :: [create_cluster_opt()].
 
 -spec create_cluster_opts() -> opt_table().
@@ -1189,7 +1230,8 @@ create_cluster(Opts, #aws_config{} = Config) ->
                               cluster_opt() |
                               deployment_configuration() |
                               load_balancers_opt() |
-                              role_opt().
+                              role_opt() |
+                              out_opt().
 -type create_service_opts() :: [create_service_opt()].
 
 -spec create_service_opts() -> opt_table().
@@ -1291,7 +1333,8 @@ delete_cluster(ClusterName, Opts, #aws_config{} = Config) ->
 %%%------------------------------------------------------------------------------
 %% DeleteService
 %%%------------------------------------------------------------------------------
--type delete_service_opt() :: {cluster, string_param()}.
+-type delete_service_opt() :: {cluster, string_param()} |
+                              out_opt().
 -type delete_service_opts() :: [delete_service_opt()].
 
 -spec delete_service_opts() -> opt_table().
@@ -1343,7 +1386,8 @@ delete_service(ServiceName, Opts, #aws_config{} = Config) ->
 %% DeregisterContainerInstance
 %%%------------------------------------------------------------------------------
 -type deregister_container_instance_opt() :: {cluster, string_param()} |
-                                             {force, boolean()}.
+                                             {force, boolean()} |
+                                             out_opt().
 -type deregister_container_instance_opts() :: [deregister_container_instance_opt()].
 
 -spec deregister_container_instance_opts() -> opt_table().
@@ -1445,7 +1489,8 @@ deregister_task_definition(TaskDefinition, Opts, Config) ->
 %%%------------------------------------------------------------------------------
 %% DescribeClusters
 %%%------------------------------------------------------------------------------
--type describe_clusters_opt() :: {clusters, [string_param()]}.
+-type describe_clusters_opt() :: {clusters, [string_param()]} |
+                                 out_opt().
 -type describe_clusters_opts() :: [describe_clusters_opt()].
 
 -spec describe_clusters_opts() -> opt_table().
@@ -1498,7 +1543,8 @@ describe_clusters(Opts, #aws_config{} = Config) ->
 %%%------------------------------------------------------------------------------
 %% DescribeContainerInstances
 %%%------------------------------------------------------------------------------
--type describe_container_instances_opt() :: {cluster, string_param()}.
+-type describe_container_instances_opt() :: {cluster, string_param()} |
+                                            out_opt().
 -type describe_container_instances_opts() :: [describe_container_instances_opt()].
 
 -spec describe_container_instances_opts() -> opt_table().
@@ -1556,7 +1602,8 @@ describe_container_instances(Instances, Opts, #aws_config{} = Config) ->
 %%%------------------------------------------------------------------------------
 %% DescribeServices
 %%%------------------------------------------------------------------------------
--type describe_services_opt() :: {cluster, string_param()}.
+-type describe_services_opt() :: {cluster, string_param()} |
+                                 out_opt().
 -type describe_services_opts() :: [describe_services_opt()].
 
 -spec describe_services_opts() -> opt_table().
@@ -1658,7 +1705,7 @@ describe_task_definition(TaskDefinition, Opts, #aws_config{} = Config) ->
 %%%------------------------------------------------------------------------------
 %% DescribeTasks
 %%%------------------------------------------------------------------------------
--type describe_tasks_opt() :: {cluster, string_param()}.
+-type describe_tasks_opt() :: {cluster, string_param()} | out_opt().
 -type describe_tasks_opts() :: [describe_tasks_opt()].
 
 -spec describe_tasks_opts() -> opt_table().
@@ -1718,7 +1765,8 @@ describe_tasks(Tasks, Opts, #aws_config{} = Config) ->
 %% ListClusters 
 %%%------------------------------------------------------------------------------
 -type list_clusters_opt() :: {max_results, 1..100} | 
-                             {next_token, binary()}.
+                             {next_token, binary()} |
+                             out_opt().
 
 -type list_clusters_opts() :: [list_clusters_opt()].
 
@@ -1770,7 +1818,8 @@ list_clusters(Opts, Config) ->
 %%%------------------------------------------------------------------------------
 -type list_container_instances_opt() :: {cluster, string_param()} |
                                         {max_results, 1..100} |
-                                        {next_token, binary()}.
+                                        {next_token, binary()} |
+                                        out_opt().
 
 -type list_container_instances_opts() :: [list_container_instances_opt()].
 
@@ -1823,7 +1872,8 @@ list_container_instances(Opts, Config) ->
 %%%------------------------------------------------------------------------------
 -type list_services_opt() :: {cluster, string_param()} |
                                         {max_results, 1..100} |
-                                        {next_token, binary()}.
+                                        {next_token, binary()} |
+                                        out_opt().
 
 -type list_services_opts() :: [list_services_opt()].
 
@@ -1877,7 +1927,8 @@ list_services(Opts, Config) ->
 -type list_task_definition_families_opt() :: {family_prefix, string_param()} |
                                              {status, active | inactive | all} |
                                              {max_results, 1..100} |
-                                             {next_token, binary()}.
+                                             {next_token, binary()} |
+                                        out_opt().
 
 -type list_task_definition_families_opts() :: [list_task_definition_families_opt()].
 
@@ -1937,7 +1988,8 @@ list_task_definition_families(Opts, Config) ->
                                      {status, active | inactive} |
                                      {sort, asc | desc} |
                                      {max_results, 1..100} |
-                                     {next_token, binary()}.
+                                     {next_token, binary()} |
+                                     out_opt().
 
 -type list_task_definitions_opts() :: [list_task_definitions_opt()].
 
@@ -1998,7 +2050,9 @@ list_task_definitions(Opts, Config) ->
                           {family, string_param()} |
                           {sort, asc | desc} |
                           {max_results, 1..100} |
-                          {next_token, binary()}.
+                          {next_token, binary()} |
+                          {launch_type, string_param()} |
+                          out_opt().
 
 -type list_tasks_opts() :: [list_tasks_opt()].
 
@@ -2013,6 +2067,7 @@ list_tasks_opts() ->
         {service_name, <<"serviceName">>, fun to_binary/1},
         {started_by, <<"startedBy">>, fun to_binary/1},
         {max_results, <<"maxResults">>, fun id/1},
+        {launch_type, <<"launchType">>, fun to_binary/1},
         {next_token, <<"nextToken">>, fun to_binary/1}
     ].
 
@@ -2059,7 +2114,8 @@ list_tasks(Opts, Config) ->
 %%%------------------------------------------------------------------------------
 -type register_task_definition_opt() :: {network_mode, ecs_network_mode()} |
                                         {task_role_arn, string_param()} |
-                                        volumes().
+                                        volumes() |
+                                        out_opt().
 -type register_task_definition_opts() :: [register_task_definition_opt()].
 
 -spec register_task_definition_opts() -> opt_table().
@@ -2125,7 +2181,9 @@ register_task_definition(ContainerDefinitions, Family, Opts, Config) ->
 -type run_task_opt() :: {cluster, string_param()} |
                         {count, pos_integer()} |
                         task_overrides_opt() |
-                        {started_by, string_param()}.
+                        placement_strategy() |
+                        {started_by, string_param()} |
+                        out_opt().
 
 -type run_task_opts() :: [run_task_opt()].
 -spec run_task_opts() -> opt_table().
@@ -2134,6 +2192,7 @@ run_task_opts() ->
         {cluster, <<"cluster">>, fun to_binary/1},
         {count, <<"count">>, fun id/1},
         task_overrides_opt(),
+        placement_strategy_opt(),
         {started_by, <<"startedBy">>, fun to_binary/1}
     ].
 
@@ -2187,7 +2246,8 @@ run_task(TaskDefinition, Opts, Config) ->
 %%%------------------------------------------------------------------------------
 -type start_task_opt() :: {cluster, string_param()} |
                           task_overrides_opt() |
-                          {started_by, string_param()}.
+                          {started_by, string_param()} |
+                          out_opt().
 
 -type start_task_opts() :: [start_task_opt()].
 -spec start_task_opts() -> opt_table().
@@ -2255,7 +2315,8 @@ start_task(TaskDefinition, ContainerInstances, Opts, Config) ->
 %% StopTask
 %%%------------------------------------------------------------------------------
 -type stop_task_opt() :: {cluster, string_param()} |
-                         {reason, string_param()}.
+                         {reason, string_param()} |
+                         out_opt().
 -type stop_task_opts() :: [stop_task_opt()].
 -spec stop_task_opts() -> opt_table().
 stop_task_opts() ->
@@ -2302,7 +2363,7 @@ stop_task(Task, Opts, #aws_config{} = Config) ->
 %%%------------------------------------------------------------------------------
 %% UpdateContainerAgent 
 %%%------------------------------------------------------------------------------
--type update_container_agent_opts() :: [{cluster, string_param()}].
+-type update_container_agent_opts() :: [{cluster, string_param()} | out_opt()].
 -spec update_container_agent_opts() -> opt_table().
 update_container_agent_opts() ->
     [{cluster, <<"cluster">>, fun to_binary/1}].
@@ -2353,7 +2414,8 @@ update_container_agent(ContainerInstance, Opts, Config) ->
 -type update_service_opt() :: {cluster, string_param()} |
                               deployment_configuration() |
                               {desired_count, pos_integer()} |
-                              {task_definition, string_param()}.
+                              {task_definition, string_param()} |
+                              out_opt().
 -type update_service_opts() :: [update_service_opt()].
 -spec update_service_opts() -> opt_table().
 update_service_opts() ->
@@ -2415,7 +2477,6 @@ ecs_request(Config, Operation, Body) ->
 
 ecs_request_no_update(Config, Operation, Body) ->
     Payload = case Body of
-               <<>> -> <<"{}">>;
                [] -> <<"{}">>;
                _ -> jsx:encode(lists:flatten(Body))
            end,
@@ -2427,7 +2488,7 @@ ecs_request_no_update(Config, Operation, Body) ->
                            request_body = Payload},
     case erlcloud_aws:request_to_return(erlcloud_retry:request(Config, Request, fun ecs_result_fun/1)) of
         {ok, {_RespHeaders, <<>>}} -> {ok, []};
-        {ok, {_RespHeaders, RespBody}} -> {ok, jsx:decode(RespBody)};
+        {ok, {_RespHeaders, RespBody}} -> {ok, jsx:decode(RespBody, [{return_maps, false}])};
         {error, _} = Error-> Error
     end.
 

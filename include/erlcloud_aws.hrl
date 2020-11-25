@@ -1,11 +1,22 @@
+-ifndef(erlcloud_aws_hrl).
+-define(erlcloud_aws_hrl, 0).
+
 -record(aws_assume_role,{
     role_arn :: string() | undefined,
     session_name = "erlcloud" :: string(),
-    duration_secs =  900 :: 900..3600,
+    duration_secs =  900 :: 900..43200,
     external_id :: string() | undefined
 }).
 
 -type(aws_assume_role() :: #aws_assume_role{}).
+
+-record(hackney_client_options, {
+	  insecure = true :: boolean() | undefined,
+	  proxy = undefined :: binary() | {binary(), non_neg_integer()} | {socks5, binary(), binary()} | {connect, binary(), binary()} | undefined,
+	  proxy_auth = undefined :: {binary(), binary()} | undefined
+}).
+
+-type(hackney_client_options() :: #hackney_client_options{}).
 
 -record(aws_config, {
           as_host="autoscaling.amazonaws.com"::string(),
@@ -33,8 +44,9 @@
           emr_scheme="https://"::string()|undefined,
           emr_host="elasticmapreduce.us-east-1.amazonaws.com"::string(),
           emr_port=undefined::non_neg_integer()|undefined,
-          sns_scheme="http://"::string(),
+          sns_scheme="https://"::undefined|string(),
           sns_host="sns.amazonaws.com"::string(),
+          sns_port=undefined::non_neg_integer()|undefined,
           mturk_host="mechanicalturk.amazonaws.com"::string(),
           mon_host="monitoring.amazonaws.com"::string(),
           mon_port=undefined::non_neg_integer()|undefined,
@@ -52,6 +64,9 @@
           lambda_scheme="https://"::string(),
           lambda_host="lambda.us-east-1.amazonaws.com"::string(),
           lambda_port=443::non_neg_integer(),
+          states_scheme="https://"::string(),
+          states_host="states.us-east-1.amazonaws.com"::string(),
+          states_port=443::non_neg_integer(),
           redshift_scheme="https://"::string(),
           redshift_host="redshift.us-east-1.amazonaws.com"::string(),
           redshift_port=443::non_neg_integer(),
@@ -59,6 +74,12 @@
           kinesis_host="kinesis.us-east-1.amazonaws.com"::string(),
           kinesis_port=80::non_neg_integer(),
           kinesis_retry=fun erlcloud_kinesis_impl:retry/2::erlcloud_kinesis_impl:retry_fun(),
+          glue_scheme="https://"::string(),
+          glue_host="glue.us-east-1.amazonaws.com"::string(),
+          glue_port=443::non_neg_integer(),
+          athena_scheme="https://"::string(),
+          athena_host="athena.us-east-1.amazonaws.com"::string(),
+          athena_port=443::non_neg_integer(),
           firehose_scheme="https://"::string(),
           firehose_host="firehose.us-east-1.amazonaws.com"::string(),
           firehose_port=80::non_neg_integer(),
@@ -79,6 +100,9 @@
           autoscaling_scheme="https://"::string(),
           autoscaling_host="autoscaling.us-east-1.amazonaws.com"::string(),
           autoscaling_port=80::non_neg_integer(),
+          application_autoscaling_scheme="https://"::string(),
+          application_autoscaling_host="autoscaling.us-east-1.amazonaws.com"::string(),
+          application_autoscaling_port=80::non_neg_integer(),
           directconnect_scheme="https://"::string(),
           directconnect_host="directconnect.us-east-1.amazonaws.com"::string(),
           directconnect_port=80::non_neg_integer(),
@@ -92,9 +116,24 @@
           ecs_scheme="https://"::string(),
           ecs_host="ecs.us-east-1.amazonaws.com"::string(),
           ecs_port=443::non_neg_integer(),
+          mes_scheme="https://"::string(),
+          mes_host="entitlement.marketplace.us-east-1.amazonaws.com"::string(),
+          mes_port=443::non_neg_integer(),
           mms_scheme="https://"::string(),
           mms_host="metering.marketplace.us-east-1.amazonaws.com"::string(),
           mms_port=443::non_neg_integer(),
+          sm_scheme="https://"::string(),
+          sm_host="secretsmanager.us-east-1.amazonaws.com"::string(),
+          sm_port=443::non_neg_integer(),
+          guardduty_scheme="https://"::string(),
+          guardduty_host="guardduty.us-east-1.amazonaws.com"::string(),
+          guardduty_port=443::non_neg_integer(),
+          cur_scheme="https://"::string(),
+          cur_host="cur.us-east-1.amazonaws.com"::string(),
+          cur_port=443::non_neg_integer(),
+          config_scheme="https://"::string(),
+          config_host="config.us-east-1.amazonaws.com"::string(),
+          config_port=443::non_neg_integer(),
           access_key_id::string()|undefined|false,
           secret_access_key::string()|undefined|false,
           security_token=undefined::string()|undefined,
@@ -119,11 +158,23 @@
           %% If you provide a custom function be aware of this anticipated change.
           %% See erlcloud_retry for full documentation.
           retry=fun erlcloud_retry:no_retry/1::erlcloud_retry:retry_fun(),
+
+          %% By default treat all non 2xx http error codes as errors.
+          %% But in some cases, like lambda call it useful to override such
+          %% behaviour by custom one.
+          retry_response_type=fun erlcloud_retry:only_http_errors/1::erlcloud_retry:response_type_fun(),
           %% Currently matches DynamoDB retry
           %% It's likely this is too many retries for other services
           retry_num=10::non_neg_integer(),
-          assume_role = #aws_assume_role{} :: aws_assume_role() %% If a role to be assumed is given
+          assume_role = #aws_assume_role{} :: aws_assume_role(), %% If a role to be assumed is given
           %% then we will try to assume the role during the update_config
+          %% region override for API gateway type requests
+          aws_region=undefined::string()|undefined,
+          %% http proxy support
+          http_proxy=undefined::string()|undefined,
+          hackney_client_options = #hackney_client_options{} :: hackney_client_options() %% The hackney client options
+          %% are used to specify the proxy, proxy_auth and insecure which is
+          %% used to support proxy based requests to s3.
          }).
 -type(aws_config() :: #aws_config{}).
 
@@ -150,5 +201,6 @@
           should_retry :: boolean() | undefined
         }).
 -type(aws_request() :: #aws_request{}).
+-define(NEXT_TOKEN_LABEL, <<"NextToken">>).
 
-
+-endif.

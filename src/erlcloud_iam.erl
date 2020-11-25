@@ -4,6 +4,7 @@
 
 -include("erlcloud.hrl").
 -include("erlcloud_aws.hrl").
+-include("erlcloud_iam.hrl").
 -include_lib("xmerl/include/xmerl.hrl").
 
 %% Library initialization.
@@ -57,7 +58,10 @@
     generate_credential_report/0, generate_credential_report/1,
     get_credential_report/0, get_credential_report/1,
     simulate_principal_policy/2, simulate_principal_policy/3,
-    simulate_custom_policy/2, simulate_custom_policy/3
+    simulate_custom_policy/2, simulate_custom_policy/3, simulate_custom_policy/4,
+    list_virtual_mfa_devices/0, list_virtual_mfa_devices/1, list_virtual_mfa_devices/2,
+    list_virtual_mfa_devices/3, list_virtual_mfa_devices/4,
+    list_virtual_mfa_devices_all/0, list_virtual_mfa_devices_all/1, list_virtual_mfa_devices_all/2
 ]).
 
 -export([get_uri/2]).
@@ -165,15 +169,15 @@ singular_result({ok, [Res]}) ->
 singular_result({error, _} = Error) ->
     Error.
 
--spec list_users() -> {ok, proplist()} | {ok, proplist(), string()} |  {error, any()}.
+-spec list_users() -> {ok, [proplist()]} | {ok, [proplist()], string()} |  {error, any()}.
 list_users() -> list_users("/").
--spec list_users(string() | aws_config()) -> {ok, proplist()} | {ok, proplist(), string()} |  {error, any()}.
+-spec list_users(string() | aws_config()) -> {ok, [proplist()]} | {ok, [proplist()], string()} |  {error, any()}.
 list_users(#aws_config{} = Config) ->
     list_users("/", Config);
 list_users(PathPrefix) ->
     list_users(PathPrefix, default_config()).
 
--spec list_users(string(), aws_config()) -> {ok, proplist()} | {ok, proplist(), string()} |  {error, any()}.
+-spec list_users(string(), aws_config()) -> {ok, [proplist()]} | {ok, [proplist()], string()} |  {error, any()}.
 list_users(PathPrefix, #aws_config{} = Config)
   when is_list(PathPrefix) ->
     ItemPath = "/ListUsersResponse/ListUsersResult/Users/member",
@@ -674,11 +678,11 @@ get_account_authorization_details(#aws_config{} = Config) ->
         {error, _} = Error -> Error
     end.
 
--spec get_account_summary() -> {ok, proplist()} |  {error, any()}.
+-spec get_account_summary() -> {ok, [proplist()]} |  {error, any()}.
 get_account_summary() ->
     get_account_summary(default_config()).
 
--spec get_account_summary(aws_config()) -> {ok, proplist()} |  {error, any()}.
+-spec get_account_summary(aws_config()) -> {ok, [proplist()]} |  {error, any()}.
 get_account_summary(#aws_config{} = Config) ->
     case iam_query(Config, "GetAccountSummary", []) of
         {ok, Doc} ->
@@ -737,6 +741,7 @@ simulate_principal_policy(PolicySourceArn, ActionNames, #aws_config{} = Config)
 simulate_custom_policy(ActionNames, PolicyInputList) ->
     simulate_custom_policy(ActionNames, PolicyInputList, default_config()).
 
+-spec simulate_custom_policy(list(), list(), aws_config() | context_entries()) -> {ok, proplist()} |  {error, any()}.
 simulate_custom_policy(ActionNames, PolicyInputList, #aws_config{} = Config)
   when is_list(ActionNames), is_list(PolicyInputList) ->
     ItemPath = "/SimulateCustomPolicyResponse/SimulateCustomPolicyResult/"
@@ -744,11 +749,93 @@ simulate_custom_policy(ActionNames, PolicyInputList, #aws_config{} = Config)
     Params = erlcloud_util:encode_list("ActionNames", ActionNames) ++ 
              erlcloud_util:encode_list("PolicyInputList", PolicyInputList),
     iam_query_all(Config, "SimulateCustomPolicy", Params,
+                  ItemPath, data_type("EvaluationResult"));
+simulate_custom_policy(ActionNames, PolicyInputList, ContextEntries) ->
+    simulate_custom_policy(ActionNames, PolicyInputList, ContextEntries, default_config()).
+
+simulate_custom_policy(ActionNames, PolicyInputList, ContextEntries, #aws_config{} = Config)
+  when is_list(ActionNames), is_list(PolicyInputList) ->
+    ItemPath = "/SimulateCustomPolicyResponse/SimulateCustomPolicyResult/"
+               "EvaluationResults/member",
+
+    Params = erlcloud_util:encode_list("ActionNames", ActionNames) ++ 
+             erlcloud_util:encode_list("PolicyInputList", PolicyInputList) ++
+             encode_context_entries(ContextEntries),
+    iam_query_all(Config, "SimulateCustomPolicy", Params,
                   ItemPath, data_type("EvaluationResult")).
+
+-spec list_virtual_mfa_devices() -> {ok, [proplist()]} | {ok, [proplist()], string()} | {error, any()}.
+list_virtual_mfa_devices() ->
+    list_virtual_mfa_devices(default_config()).
+
+-spec list_virtual_mfa_devices(string() | aws_config()) -> {ok, [proplist()]} | {ok, [proplist()], string()} | {error, any()}.
+list_virtual_mfa_devices(#aws_config{} = Config) ->
+    list_virtual_mfa_devices(undefined, undefined, undefined, Config);
+list_virtual_mfa_devices(AssignmentStatus) ->
+    list_virtual_mfa_devices(AssignmentStatus, undefined, undefined, default_config()).
+
+-spec list_virtual_mfa_devices(string(), string() | aws_config()) -> {ok, [proplist()]} | {ok, [proplist()], string()} | {error, any()}.
+list_virtual_mfa_devices(AssignmentStatus, #aws_config{} = Config) ->
+    list_virtual_mfa_devices(AssignmentStatus, undefined, undefined, Config);
+list_virtual_mfa_devices(AssignmentStatus, Marker) ->
+    list_virtual_mfa_devices(AssignmentStatus, Marker, undefined, default_config()).
+
+-spec list_virtual_mfa_devices(string(), string(), string()| aws_config()) -> {ok, [proplist()]} | {ok, [proplist()], string()} | {error, any()}.
+list_virtual_mfa_devices(AssignmentStatus, Marker, #aws_config{} = Config) ->
+    list_virtual_mfa_devices(AssignmentStatus, Marker, undefined, Config);
+list_virtual_mfa_devices(AssignmentStatus, Marker, MaxItems) ->
+    list_virtual_mfa_devices(AssignmentStatus, Marker, MaxItems, default_config()).
+
+-spec list_virtual_mfa_devices(undefined | string(), undefined | string(), undefined | string(), aws_config()) -> {ok, [proplist()]} | {ok, [proplist()], string()} | {error, any()}.
+list_virtual_mfa_devices(AssignmentStatus, Marker, MaxItems, #aws_config{} = Config) ->
+    Params = make_list_virtual_mfa_devices_params(AssignmentStatus, Marker, MaxItems),
+    ItemPath = "/ListVirtualMFADevicesResponse/ListVirtualMFADevicesResult/VirtualMFADevices/member",
+    iam_query(Config, "ListVirtualMFADevices", Params, ItemPath, data_type("VirtualMFADeviceMetadata")).
+
+
+-spec list_virtual_mfa_devices_all() -> {ok, [proplist()]} | {error, any()}.
+list_virtual_mfa_devices_all() ->
+    list_virtual_mfa_devices_all(default_config()).
+
+-spec list_virtual_mfa_devices_all(string() | aws_config()) -> {ok, [proplist()]} | {error, any()}.
+list_virtual_mfa_devices_all(#aws_config{} = Config) ->
+    list_virtual_mfa_devices_all(undefined, Config);
+list_virtual_mfa_devices_all(AssignmentStatus) ->
+    list_virtual_mfa_devices_all(AssignmentStatus, default_config()).
+
+-spec list_virtual_mfa_devices_all(undefined | string(), aws_config()) -> {ok, [proplist()]} | {error, any()}.
+list_virtual_mfa_devices_all(AssignmentStatus, #aws_config{} = Config) ->
+    Params = make_list_virtual_mfa_devices_params(AssignmentStatus, undefined, undefined),
+    ItemPath = "/ListVirtualMFADevicesResponse/ListVirtualMFADevicesResult/VirtualMFADevices/member",
+    iam_query_all(Config, "ListVirtualMFADevices", Params, ItemPath, data_type("VirtualMFADeviceMetadata")).
+
 
 %
 % Utils
 %
+
+encode_context_entries(ContextEntries) ->
+    ParsedContextEntriesValues = [ [{"ContextKeyName", ContextKeyName},
+                                    {"ContextKeyType", ContextKeyType},
+                                    {"ContextKeyValues", erlcloud_util:encode_list("", ContextKeyValues)}] ||
+                                   [{context_key_name, ContextKeyName},
+                                    {context_key_type, ContextKeyType},
+                                    {context_key_values, ContextKeyValues}] <-
+                                   ContextEntries],
+    EncodedContextEntries = erlcloud_aws:param_list(ParsedContextEntriesValues, "ContextEntries.member"),
+    lists:flatten([flatten_encoded_context_value(Key, Value) || {Key, Value} <- EncodedContextEntries]).
+
+flatten_encoded_context_value(Key, Value) ->
+   flatten_encoded_context_value(Key, Value, []).
+
+flatten_encoded_context_value(_, [], Acc) ->
+    Acc;
+flatten_encoded_context_value(Key, [{SubKey, Val} | Values], Acc) ->
+    Acc2 = [{Key++SubKey, Val}] ++ Acc,
+    flatten_encoded_context_value(Key, Values, Acc2);
+flatten_encoded_context_value(Key, Val, _) ->
+    [{Key, Val}].
+
 iam_query(Config, Action, Params) ->
     iam_query(Config, Action, Params, ?API_VERSION).
 
@@ -833,6 +920,10 @@ extract_account_summary(Item) ->
       end, [], Entries).
 
 
+data_type("VirtualMFADeviceMetadata") ->
+    [{"SerialNumber", serial_number, "String"},
+     {"EnableDate", enable_date, "DateTime"},
+     {"User", user, data_type("UserDetail")}];
 data_type("AccountAuthorizationDetails") ->
     [{"UserDetailList/member", users, data_type("UserDetail")},
      {"GroupDetailList/member", groups, data_type("GroupDetail")},
@@ -964,4 +1055,16 @@ data_fun("Boolean") -> {erlcloud_xml, get_bool};
 data_fun("Uri") -> {?MODULE, get_uri}.
 
 get_uri(Key, Item) ->
-    http_uri:decode(erlcloud_xml:get_text(Key, Item)).
+    erlcloud_util:http_uri_decode(erlcloud_xml:get_text(Key, Item)).
+
+make_list_virtual_mfa_devices_params(undefined, undefined, undefined) ->
+    [];
+make_list_virtual_mfa_devices_params(AssignmentStatus, Marker, MaxItems) ->
+    make_list_virtual_mfa_devices_param(AssignmentStatus, "AssignmentStatus") ++ 
+    make_list_virtual_mfa_devices_param(Marker ,"Marker") ++ 
+    make_list_virtual_mfa_devices_param(MaxItems, "MaxItems").
+
+make_list_virtual_mfa_devices_param(undefined, _) ->
+    [];
+make_list_virtual_mfa_devices_param(Param, ParamString) ->
+    [{ParamString, Param}].

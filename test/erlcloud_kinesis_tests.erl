@@ -33,10 +33,18 @@ operation_test_() ->
       fun create_stream_output_tests/1,
       fun delete_stream_input_tests/1,
       fun delete_stream_output_tests/1,
+      fun list_shards_input_tests/1,
+      fun list_shards_output_tests/1,
       fun list_streams_input_tests/1,
       fun list_streams_output_tests/1,
       fun describe_stream_input_tests/1,
       fun describe_stream_output_tests/1,
+      fun describe_stream_summary_input_tests/1,
+      fun describe_stream_summary_output_tests/1,
+      fun enable_enchanced_monitoring_input_tests/1,
+      fun enable_enchanced_monitoring_output_tests/1,
+      fun disable_enchanced_monitoring_input_tests/1,
+      fun disable_enchanced_monitoring_output_tests/1,
       fun get_shard_iterator_input_tests/1,
       fun get_shard_iterator_output_tests/1,
       fun get_records_input_tests/1,
@@ -91,8 +99,8 @@ sort_json(V) ->
 %% verifies that the parameters in the body match the expected parameters
 -spec validate_body(binary(), expected_body()) -> ok.
 validate_body(Body, Expected) ->
-    Want = sort_json(jsx:decode(list_to_binary(Expected))),
-    Actual = sort_json(jsx:decode(Body)),
+    Want = sort_json(decode(list_to_binary(Expected))),
+    Actual = sort_json(decode(Body)),
     case Want =:= Actual of
         true -> ok;
         false ->
@@ -187,7 +195,7 @@ create_stream_output_tests(_) ->
     Tests =
         [?_kinesis_test(
             {"CreateStream example response", "{}",
-             {ok, jsx:decode(<<"{}">>)}})
+             {ok, decode(<<"{}">>)}})
         ],
 
     output_tests(?_f(erlcloud_kinesis:create_stream(<<"streamName">>, 2)), Tests).
@@ -212,10 +220,136 @@ delete_stream_output_tests(_) ->
     Tests =
         [?_kinesis_test(
             {"DeleteStream example response", "{}",
-             {ok, jsx:decode(<<"{}">>)}})
+             {ok, decode(<<"{}">>)}})
         ],
 
     output_tests(?_f(erlcloud_kinesis:delete_stream(<<"streamName">>)), Tests).
+
+%% ListStreams test based on the API examples:
+%% http://docs.aws.amazon.com/kinesis/latest/APIReference/API_ListShards.html
+list_shards_input_tests(_) ->
+    Tests =
+        [?_kinesis_test(
+            {"ListShards example request",
+             ?_f(erlcloud_kinesis:list_shards(<<"exampleStreamName">>, [{max_results, 3}])), "{
+                \"StreamName\" : \"exampleStreamName\",
+                \"MaxResults\" : 3
+             }"
+            })
+        ],
+
+    Response = "{
+        \"NextToken\": \"AAAAAAAAAAGK9EEG0sJqVhCUS2JsgigQ5dcpB4q9PYswrH2oK44Skbjtm+WR0xA7/hrAFFsohevH1/OyPnbzKBS1byPyCZuVcokYtQe/b1m4c0SCI7jctPT0oUTLRdwSRirKm9dp9YC/EL+kZHOvYAUnztVGsOAPEFC3ECf/bVC927bDZBbRRzy/44OHfWmrCLcbcWqehRh5D14WnL3yLsumhiHDkyuxSlkBepauvMnNLtTOlRtmQ5Q5reoujfq2gzeCSOtLcfXgBMztJqohPdgMzjTQSbwB9Am8rMpHLsDbSdMNXmITvw==\",
+        \"Shards\": [
+            {
+                \"ShardId\": \"shardId-000000000001\",
+                \"HashKeyRange\": {
+                    \"EndingHashKey\": \"68056473384187692692674921486353642280\",
+                    \"StartingHashKey\": \"34028236692093846346337460743176821145\"
+                },
+                \"SequenceNumberRange\": {
+                    \"StartingSequenceNumber\": \"49579844037727333356165064238440708846556371693205002258\"
+                }
+            },
+            {
+                \"ShardId\": \"shardId-000000000002\",
+                \"HashKeyRange\": {
+                    \"EndingHashKey\": \"102084710076281539039012382229530463436\",
+                    \"StartingHashKey\": \"68056473384187692692674921486353642281\"
+                },
+                \"SequenceNumberRange\": {
+                    \"StartingSequenceNumber\": \"49579844037749634101363594861582244564829020124710982690\"
+                }
+            },
+            {
+                \"ShardId\": \"shardId-000000000003\",
+                \"HashKeyRange\": {
+                    \"EndingHashKey\": \"136112946768375385385349842972707284581\",
+                    \"StartingHashKey\": \"102084710076281539039012382229530463437\"
+                },
+                \"SequenceNumberRange\": {
+                    \"StartingSequenceNumber\": \"49579844037771934846562125484723780283101668556216963122\"
+                }
+            }
+        ]
+    }",
+    input_tests(Response, Tests).
+
+list_shards_output_tests(_) ->
+    Tests =
+        [?_kinesis_test(
+            {"ListShards example response", "{
+                \"NextToken\": \"AAAAAAAAAAGK9EEG0sJqVhCUS2JsgigQ5dcpB4q9PYswrH2oK44Skbjtm+WR0xA7/hrAFFsohevH1/OyPnbzKBS1byPyCZuVcokYtQe/b1m4c0SCI7jctPT0oUTLRdwSRirKm9dp9YC/EL+kZHOvYAUnztVGsOAPEFC3ECf/bVC927bDZBbRRzy/44OHfWmrCLcbcWqehRh5D14WnL3yLsumhiHDkyuxSlkBepauvMnNLtTOlRtmQ5Q5reoujfq2gzeCSOtLcfXgBMztJqohPdgMzjTQSbwB9Am8rMpHLsDbSdMNXmITvw==\",
+                \"Shards\": [
+                    {
+                        \"ShardId\": \"shardId-000000000001\",
+                        \"HashKeyRange\": {
+                            \"EndingHashKey\": \"68056473384187692692674921486353642280\",
+                            \"StartingHashKey\": \"34028236692093846346337460743176821145\"
+                        },
+                        \"SequenceNumberRange\": {
+                            \"StartingSequenceNumber\": \"49579844037727333356165064238440708846556371693205002258\"
+                        }
+                    },
+                    {
+                        \"ShardId\": \"shardId-000000000002\",
+                        \"HashKeyRange\": {
+                            \"EndingHashKey\": \"102084710076281539039012382229530463436\",
+                            \"StartingHashKey\": \"68056473384187692692674921486353642281\"
+                        },
+                        \"SequenceNumberRange\": {
+                            \"StartingSequenceNumber\": \"49579844037749634101363594861582244564829020124710982690\"
+                        }
+                    },
+                    {
+                        \"ShardId\": \"shardId-000000000003\",
+                        \"HashKeyRange\": {
+                            \"EndingHashKey\": \"136112946768375385385349842972707284581\",
+                            \"StartingHashKey\": \"102084710076281539039012382229530463437\"
+                        },
+                        \"SequenceNumberRange\": {
+                            \"StartingSequenceNumber\": \"49579844037771934846562125484723780283101668556216963122\"
+                        }
+                    }
+                ]
+             }",
+             {ok, [
+                 {<<"NextToken">>, <<"AAAAAAAAAAGK9EEG0sJqVhCUS2JsgigQ5dcpB4q9PYswrH2oK44Skbjtm+WR0xA7/hrAFFsohevH1/OyPnbzKBS1byPyCZuVcokYtQe/b1m4c0SCI7jctPT0oUTLRdwSRirKm9dp9YC/EL+kZHOvYAUnztVGsOAPEFC3ECf/bVC927bDZBbRRzy/44OHfWmrCLcbcWqehRh5D14WnL3yLsumhiHDkyuxSlkBepauvMnNLtTOlRtmQ5Q5reoujfq2gzeCSOtLcfXgBMztJqohPdgMzjTQSbwB9Am8rMpHLsDbSdMNXmITvw==">>},
+                 {<<"Shards">>, [
+                     [
+                         {<<"ShardId">>, <<"shardId-000000000001">>},
+                         {<<"HashKeyRange">>, [
+                             {<<"EndingHashKey">>, <<"68056473384187692692674921486353642280">>},
+                             {<<"StartingHashKey">>, <<"34028236692093846346337460743176821145">>}
+                         ]},
+                         {<<"SequenceNumberRange">>, [
+                             {<<"StartingSequenceNumber">>, <<"49579844037727333356165064238440708846556371693205002258">>}
+                         ]}
+                     ], [
+                         {<<"ShardId">>, <<"shardId-000000000002">>},
+                         {<<"HashKeyRange">>, [
+                             {<<"EndingHashKey">>, <<"102084710076281539039012382229530463436">>},
+                             {<<"StartingHashKey">>, <<"68056473384187692692674921486353642281">>}
+                         ]},
+                         {<<"SequenceNumberRange">>, [
+                             {<<"StartingSequenceNumber">>, <<"49579844037749634101363594861582244564829020124710982690">>}
+                         ]}
+                     ], [
+                         {<<"ShardId">>, <<"shardId-000000000003">>},
+                         {<<"HashKeyRange">>, [
+                             {<<"EndingHashKey">>, <<"136112946768375385385349842972707284581">>},
+                             {<<"StartingHashKey">>, <<"102084710076281539039012382229530463437">>}
+                         ]},
+                         {<<"SequenceNumberRange">>, [
+                             {<<"StartingSequenceNumber">>, <<"49579844037771934846562125484723780283101668556216963122">>}
+                         ]}
+                     ]
+                ]}
+             ]}
+            }
+        )],
+
+    output_tests(?_f(erlcloud_kinesis:list_shards(<<"staging">>)), Tests).
 
 %% ListStreams test based on the API examples:
 %% http://docs.aws.amazon.com/kinesis/latest/APIReference/API_ListStreams.html
@@ -360,25 +494,214 @@ describe_stream_output_tests(_) ->
 
     output_tests(?_f(erlcloud_kinesis:describe_stream(<<"staging">>)), Tests).
 
+%% DescribeStream test based on the API examples:
+%% http://docs.aws.amazon.com/kinesis/latest/APIReference/API_DescribeStreamSummary.html
+describe_stream_summary_input_tests(_) ->
+  Tests =
+    [?_kinesis_test(
+      {"DescribeStream example request",
+        ?_f(erlcloud_kinesis:describe_stream_summary(<<"test">>)), "
+{
+  \"StreamName\": \"test\"
+}"
+      })
+    ],
+
+  Response = "
+{
+\"StreamDescription\": {
+    \"EncryptionType\": \"NONE\",
+    \"EnhancedMonitoring\": [
+        {
+            \"ShardLevelMetrics\": [ \"\OutgoingRecords\", \"IteratorAgeMilliseconds\", \"\IncomingRecords\"]
+        }
+    ],
+    \"OpenShardCount\": 10,
+    \"RetentionPeriodHours\": 24,
+    \"StreamARN\": \"arn:aws:kinesis:us-east-1:821148768124:stream/staging\",
+    \"StreamCreationTimestamp\": 1522843376,
+    \"StreamName\": \"staging\",
+    \"StreamStatus\": \"ACTIVE\"
+}
+}",
+  input_tests(Response, Tests).
+
+describe_stream_summary_output_tests(_) ->
+  Tests =
+    [?_kinesis_test(
+      {"DescribeStream example response", "
+{
+\"StreamDescriptionSummary\": {
+    \"EncryptionType\": \"NONE\",
+    \"EnhancedMonitoring\": [
+        {
+            \"ShardLevelMetrics\": [ \"\OutgoingRecords\", \"IteratorAgeMilliseconds\", \"\IncomingRecords\"]
+        }
+    ],
+    \"OpenShardCount\": 10,
+    \"RetentionPeriodHours\": 24,
+    \"StreamARN\": \"arn:aws:kinesis:us-west-2:821148768124:stream/test\",
+    \"StreamCreationTimestamp\": 1522843376,
+    \"StreamName\": \"test\",
+    \"StreamStatus\": \"ACTIVE\"
+}
+}",
+        {ok,[{<<"StreamDescriptionSummary">>,
+          [{<<"EncryptionType">>,<<"NONE">>},
+            {<<"EnhancedMonitoring">>,
+              [[{<<"ShardLevelMetrics">>,
+                [<<"OutgoingRecords">>,<<"IteratorAgeMilliseconds">>,
+                  <<"IncomingRecords">>]}]]},
+            {<<"OpenShardCount">>, 10},
+            {<<"RetentionPeriodHours">>, 24},
+            {<<"StreamARN">>,
+              <<"arn:aws:kinesis:us-west-2:821148768124:stream/test">>},
+            {<<"StreamCreationTimestamp">>, 1522843376},
+            {<<"StreamName">>,<<"test">>},
+            {<<"StreamStatus">>,<<"ACTIVE">>}]}]}
+      })
+    ],
+
+  output_tests(?_f(erlcloud_kinesis:describe_stream_summary(<<"staging">>)), Tests).
+
+%% EnableEnhancedMonitoring test based on the API examples:
+%% http://docs.aws.amazon.com/kinesis/latest/APIReference/API_EnableEnhancedMonitoring.html
+enable_enchanced_monitoring_input_tests(_) ->
+  Stream = <<"test">>,
+  Metric = [<<"IncomingBytes">>],
+  Tests =
+    [?_kinesis_test(
+      {"EnableEnhancedMonitoring example request for ALL",
+        ?_f(erlcloud_kinesis:enable_enhanced_monitoring(Stream)),
+        "{\"StreamName\": \"test\",
+          \"ShardLevelMetrics\": [ \"ALL\"]
+         }"}
+      ),
+      ?_kinesis_test(
+        {"EnableEnhancedMonitoring example request for specific metric",
+          ?_f(erlcloud_kinesis:enable_enhanced_monitoring(Stream, Metric)),
+          "{\"StreamName\": \"test\",
+            \"ShardLevelMetrics\": [ \"IncomingBytes\"]
+           }"}
+      )
+    ],
+  Response = "{
+    \"CurrentShardLevelMetrics\":[],
+    \"DesiredShardLevelMetrics\":[\"IncomingBytes\",\"OutgoingRecords\",\"IteratorAgeMilliseconds\",
+        \"IncomingRecords\",\"ReadProvisionedThroughputExceeded\",
+        \"WriteProvisionedThroughputExceeded\",\"OutgoingBytes\"
+    ],\"StreamName\":\"test\"}",
+  input_tests(Response, Tests).
+
+enable_enchanced_monitoring_output_tests(_) ->
+  Tests =
+    [?_kinesis_test(
+      {"EnableEnhancedMonitoring example response", "
+        {\"CurrentShardLevelMetrics\":[],
+        \"DesiredShardLevelMetrics\":[\"IncomingBytes\",\"OutgoingRecords\",\"IteratorAgeMilliseconds\",\"IncomingRecords\",
+            \"ReadProvisionedThroughputExceeded\",\"WriteProvisionedThroughputExceeded\",\"OutgoingBytes\"
+        ],\"StreamName\":\"test\"}",
+        {ok,[{<<"CurrentShardLevelMetrics">>, []},
+          {<<"DesiredShardLevelMetrics">>,[
+            <<"IncomingBytes">>,<<"OutgoingRecords">>,
+            <<"IteratorAgeMilliseconds">>,<<"IncomingRecords">>,
+            <<"ReadProvisionedThroughputExceeded">>,
+            <<"WriteProvisionedThroughputExceeded">>,
+            <<"OutgoingBytes">>]},
+          {<<"StreamName">>,<<"test">>}]}
+      })
+    ],
+  output_tests(?_f(erlcloud_kinesis:enable_enhanced_monitoring(<<"test">>)), Tests).
+
+%% DisableEnhancedMonitoring test based on the API examples:
+%% https://docs.aws.amazon.com/kinesis/latest/APIReference/API_DisableEnhancedMonitoring.html
+disable_enchanced_monitoring_input_tests(_) ->
+  Stream = <<"test">>,
+  Metric = [<<"IncomingBytes">>],
+  Tests =
+    [?_kinesis_test(
+      {"DisableEnhancedMonitoring example request for ALL",
+        ?_f(erlcloud_kinesis:disable_enhanced_monitoring(Stream)),
+        "{\"StreamName\": \"test\",
+          \"ShardLevelMetrics\": [ \"ALL\"]
+         }"}
+    ),
+      ?_kinesis_test(
+        {"DisableEnhancedMonitoring example for specific",
+          ?_f(erlcloud_kinesis:disable_enhanced_monitoring(Stream, Metric)),
+          "{\"StreamName\": \"test\",
+            \"ShardLevelMetrics\": [ \"IncomingBytes\"]
+           }"}
+      )
+    ],
+  Response = "{
+    \"CurrentShardLevelMetrics\":[\"IncomingBytes\",\"OutgoingRecords\",\"IteratorAgeMilliseconds\",
+        \"IncomingRecords\",\"ReadProvisionedThroughputExceeded\",
+        \"WriteProvisionedThroughputExceeded\",\"OutgoingBytes\"
+    ],
+    \"DesiredShardLevelMetrics\":[],\"StreamName\":\"test\"}",
+  input_tests(Response, Tests).
+
+disable_enchanced_monitoring_output_tests(_) ->
+  Tests =
+    [?_kinesis_test(
+      {"DisableEnhancedMonitoring example response", "
+        {\"CurrentShardLevelMetrics\":[
+            \"IncomingBytes\",\"OutgoingRecords\",\"IteratorAgeMilliseconds\",\"IncomingRecords\",
+            \"ReadProvisionedThroughputExceeded\",\"WriteProvisionedThroughputExceeded\",\"OutgoingBytes\"
+        ],
+        \"DesiredShardLevelMetrics\":[],\"StreamName\":\"test\"}",
+        {ok,[{<<"CurrentShardLevelMetrics">>, [
+            <<"IncomingBytes">>,<<"OutgoingRecords">>,
+            <<"IteratorAgeMilliseconds">>,<<"IncomingRecords">>,
+            <<"ReadProvisionedThroughputExceeded">>,
+            <<"WriteProvisionedThroughputExceeded">>,
+            <<"OutgoingBytes">>]},
+          {<<"DesiredShardLevelMetrics">>,[]},
+          {<<"StreamName">>,<<"test">>}]}
+      })
+    ],
+  output_tests(?_f(erlcloud_kinesis:disable_enhanced_monitoring(<<"test">>, [<<"ALL">>])), Tests).
+
 %% GetShardIterator test based on the API examples:
 %% http://docs.aws.amazon.com/kinesis/latest/APIReference/API_GetShardIterator.html
 get_shard_iterator_input_tests(_) ->
+    Stream = <<"test">>,
+    Shard = <<"shardId-000000000000">>,
     Tests =
         [?_kinesis_test(
-            {"GetShardIterator example request",
-             ?_f(erlcloud_kinesis:get_shard_iterator(<<"test">>, <<"shardId-000000000000">>, <<"TRIM_HORIZON">>)), "
-{
-  \"StreamName\": \"test\",
-  \"ShardId\": \"shardId-000000000000\",
-  \"ShardIteratorType\": \"TRIM_HORIZON\"
-}"
-            })
+            {"GetShardIterator example request for TRIM_HORIZON",
+             ?_f(erlcloud_kinesis:get_shard_iterator(Stream,
+                                                     Shard,
+                                                     <<"TRIM_HORIZON">>)),
+             "{\"StreamName\": \"test\","
+              "\"ShardId\": \"shardId-000000000000\","
+              "\"ShardIteratorType\": \"TRIM_HORIZON\"}"}
+        ),
+         ?_kinesis_test(
+             {"GetShardIterator example request for AT_TIMESTAMP",
+              ?_f(erlcloud_kinesis:get_shard_iterator(Stream,
+                                                      Shard,
+                                                      <<"AT_TIMESTAMP">>,
+                                                      1499263032)),
+              "{\"StreamName\": \"test\","
+               "\"ShardId\": \"shardId-000000000000\","
+               "\"ShardIteratorType\": \"AT_TIMESTAMP\","
+               "\"Timestamp\":1499263032}"}
+         ),
+         ?_kinesis_test(
+             {"GetShardIterator example request for AT_SEQUENCE_NUMBER",
+              ?_f(erlcloud_kinesis:get_shard_iterator(Stream,
+                                                      Shard,
+                                                      <<"AT_SEQUENCE_NUMBER">>,
+                                                      <<"123">>)),
+              "{\"StreamName\": \"test\","
+               "\"ShardId\": \"shardId-000000000000\","
+               "\"ShardIteratorType\": \"AT_SEQUENCE_NUMBER\","
+               "\"StartingSequenceNumber\":\"123\"}"}
+         )
         ],
-
-    Response = "
-{
-  \"ShardIterator\": \"AAAAAAAAAAFHJejL6/AjDShV3pIXsxYZT7Xj2G6EHxokHqT2D1stIOVYUEyprlUGWUepKqUDaR0+hB6qTlKvZa+fsBRqgHi4\"
-}",
+    Response = "{\"ShardIterator\": \"AAAAAAAAAAFHJejL6/AjDShV3pIXsxYZT7Xj2G6EHxokHqT2D1stIOVYUEyprlUGWUepKqUDaR0+hB6qTlKvZa+fsBRqgHi4\"}",
     input_tests(Response, Tests).
 
 get_shard_iterator_output_tests(_) ->
@@ -631,7 +954,7 @@ merge_shards_output_tests(_) ->
     Tests =
         [?_kinesis_test(
             {"MergeShards example response", "{}",
-             {ok, jsx:decode(<<"{}">>)}})
+             {ok, decode(<<"{}">>)}})
         ],
 
     output_tests(?_f(erlcloud_kinesis:merge_shards(<<"test">>, <<"shardId-000000000001">>, <<"shardId-000000000003">>)), Tests).
@@ -658,7 +981,7 @@ split_shards_output_tests(_) ->
     Tests =
         [?_kinesis_test(
             {"SplitShard example response", "{}",
-             {ok, jsx:decode(<<"{}">>)}})
+             {ok, decode(<<"{}">>)}})
         ],
 
     output_tests(?_f(erlcloud_kinesis:split_shards(<<"test">>, <<"shardId-000000000000">>, <<"10">>)), Tests).
@@ -705,7 +1028,7 @@ list_tags_for_stream_output_tests(_) ->
                  \"Tags\": [{\"Key\":\"key1\",\"Value\":\"val1\"}]}",
     Tests = [?_kinesis_test({"List tags response test",
                              Response,
-                             {ok, jsx:decode(list_to_binary(Response))}})],
+                             {ok, decode(list_to_binary(Response))}})],
     output_tests(
         ?_f(erlcloud_kinesis:list_tags_for_stream(<<"stream">>, <<"key1">>, 1)),
         Tests
@@ -753,3 +1076,6 @@ remove_tags_from_stream_output_tests(_) ->
                                                      [<<"key">>])),
         Tests
     ).
+
+decode(S) ->
+    jsx:decode(S, [{return_maps, false}]).

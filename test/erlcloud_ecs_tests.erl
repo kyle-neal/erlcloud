@@ -1319,7 +1319,7 @@ describe_container_instances_output_tests(_) ->
                 failures = []
             }}})
         ],
-    output_tests(?_f(erlcloud_ecs:describe_container_instances("f9cc75bb-0c94-46b9-bf6d-49d320bc1551", [{out, record}])), Tests).
+    output_tests(?_f(erlcloud_ecs:describe_container_instances(["f9cc75bb-0c94-46b9-bf6d-49d320bc1551"], [{out, record}])), Tests).
 
 %% DescribeServices test based on the API examples:
 %% http://docs.aws.amazon.com/AmazonECS/latest/APIReference/API_DescribeServices.html
@@ -1706,6 +1706,7 @@ describe_tasks_output_tests(_) ->
       ],
       \"desiredStatus\": \"RUNNING\",
       \"lastStatus\": \"RUNNING\",
+      \"launchType\": \"FARGATE\",
       \"overrides\": {
         \"containerOverrides\": [
           {
@@ -1753,6 +1754,7 @@ describe_tasks_output_tests(_) ->
                         ],
                         desired_status = <<"RUNNING">>,
                         last_status = <<"RUNNING">>,
+                        launch_type = <<"FARGATE">>,
                         overrides = #ecs_task_override{
                             container_overrides = [
                                 #ecs_container_override{
@@ -2323,6 +2325,30 @@ run_task_input_tests(_) ->
   \"taskDefinition\": \"hello_world\"
 }
 "
+            }),
+         ?_ecs_test(
+            {"RunTask example request",
+             ?_f(erlcloud_ecs:run_task(
+                 "hello_world",
+                 [{count, 1},
+                  {placement_strategy, [
+                      [{field, "attribute:ecs.availability-zone"},
+                       {type, "spread"}],
+                      [{field, "instanceId"},
+                       {type, "spread"}]
+                  ]}
+                 ])), "
+{
+  \"count\": 1,
+  \"placementStrategy\": [
+      {\"type\": \"spread\",
+       \"field\": \"attribute:ecs.availability-zone\"},
+      {\"type\": \"spread\",
+       \"field\": \"instanceId\"}
+   ],
+  \"taskDefinition\": \"hello_world\"
+}
+"
             })
         ],
     Response = "
@@ -2392,6 +2418,7 @@ run_task_output_tests(_) ->
       ],
       \"desiredStatus\": \"RUNNING\",
       \"lastStatus\": \"PENDING\",
+      \"launchType\": \"EC2\",
       \"overrides\": {
         \"containerOverrides\": [
           {
@@ -2430,6 +2457,7 @@ run_task_output_tests(_) ->
                         ],
                         desired_status = <<"RUNNING">>,
                         last_status = <<"PENDING">>,
+                        launch_type = <<"EC2">>,
                         overrides = #ecs_task_override{
                             container_overrides = [
                                 #ecs_container_override{
@@ -2532,6 +2560,7 @@ start_task_output_tests(_) ->
       ],
       \"desiredStatus\": \"RUNNING\",
       \"lastStatus\": \"PENDING\",
+      \"launchType\": \"FARGATE\",
       \"overrides\": {
         \"containerOverrides\": [
           {
@@ -2570,6 +2599,7 @@ start_task_output_tests(_) ->
                         ],
                         desired_status = <<"RUNNING">>,
                         last_status = <<"PENDING">>,
+                        launch_type = <<"FARGATE">>,
                         overrides = #ecs_task_override{
                             container_overrides = [
                                 #ecs_container_override{
@@ -3216,8 +3246,8 @@ sort_json(V) ->
 %% verifies that the parameters in the body match the expected parameters
 -spec validate_body(binary(), expected_body()) -> ok.
 validate_body(Body, Expected) ->
-    Want = sort_json(jsx:decode(list_to_binary(Expected))),
-    Actual = sort_json(jsx:decode(Body)),
+    Want = sort_json(jsx:decode(list_to_binary(Expected), [{return_maps, false}])),
+    Actual = sort_json(jsx:decode(Body, [{return_maps, false}])),
     case Want =:= Actual of
         true -> ok;
         false ->
@@ -3260,7 +3290,7 @@ input_tests(Response, Tests) ->
 %%%===================================================================
 
 %% returns the mock of the erlcloud_httpc function output tests expect to be called.
--spec output_expect(string()) -> fun().
+-spec output_expect(binary()) -> fun().
 output_expect(Response) ->
     fun(_Url, post, _Headers, _Body, _Timeout, _Config) ->
             {ok, {{200, "OK"}, [], Response}}

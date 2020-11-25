@@ -7,15 +7,16 @@ request_test_() ->
     {foreach,
      fun start/0,
      fun stop/1,
-     [fun request_default_test/1,
-      fun request_retry_test/1,
-      fun request_prot_host_port_str_test/1,
-      fun request_prot_host_port_int_test/1,
-      fun get_service_status_test/1]}.
+     [fun test_request_default/1,
+      fun test_request_retry/1,
+      fun test_request_prot_host_port_str/1,
+      fun test_request_prot_host_port_int/1,
+      fun test_get_service_status/1,
+      fun test_auto_config_with_env/1]}.
 
 start() ->
     meck:new(erlcloud_httpc),
-    meck:expect(erlcloud_httpc, request, fun(_,_,_,_,_,_) -> {ok, {{200, "OK"}, [], ok}} end),
+    meck:expect(erlcloud_httpc, request, fun(_,_,_,_,_,_) -> {ok, {{200, "OK"}, [], <<"OkBody">>}} end),
     ok.
 
 stop(_) ->
@@ -27,12 +28,12 @@ config() ->
                 retry = fun erlcloud_retry:default_retry/1,
                 retry_num = 3}.
 
-request_default_test(_) ->
-    ok = erlcloud_aws:aws_request(get, "host", "/", [], "id", "key"),
+test_request_default(_) ->
+    <<"OkBody">> = erlcloud_aws:aws_request(get, "host", "/", [], "id", "key"),
     Url = get_url_from_history(meck:history(erlcloud_httpc)),
     test_url(https, "host", 443, "/", Url).
 
-request_retry_test(_) ->
+test_request_retry(_) ->
     Response400 = {ok, {{400, "Bad Request"}, [],
         <<"<ErrorResponse xmlns=\"http://elasticloadbalancing.amazonaws.com/doc/2012-06-01/\">\n"
           "  <Error>\n"
@@ -51,29 +52,41 @@ request_retry_test(_) ->
                 "<Detail/>"
             "</Error>
           <RequestId>87503803-73c7-5e4d-8619-76be476a7915</RequestId></ErrorResponse>">>}},
+    Response429 = {ok, {{429, "Too Many Requests"}, [],
+        <<"{"
+             "\"Reason\":\"ReservedFunctionConcurrentInvocationLimitExceeded\","
+             "\"Type\":\"User\","
+             "\"message\":\"Rate Exceeded.\""
+          "}">>}},
     Response200 = {ok, {{200, "OK"}, [], <<"OkBody">>}},
-    meck:sequence(erlcloud_httpc, request, 6, [Response400, Response200]),
-    <<"OkBody">> = erlcloud_aws:aws_request(get, "host", "/", [], config()),
+    MeckAndRequest =
+        fun
+          ({ResponseSeq, xml4}) ->
+              meck:sequence(erlcloud_httpc, request, 6, ResponseSeq),
+              erlcloud_aws:aws_request_xml4(get, "host", "/", [], "any", config());
+          (ResponseSeq) ->
+              meck:sequence(erlcloud_httpc, request, 6, ResponseSeq),
+              <<"OkBody">> = erlcloud_aws:aws_request(get, "host", "/", [], config())
+        end,
+    [?_assertMatch(<<"OkBody">>, MeckAndRequest([Response400, Response200])),
+     ?_assertMatch(<<"OkBody">>, MeckAndRequest([Response400, Response500, Response200])),
+     ?_assertMatch(<<"OkBody">>, MeckAndRequest([Response429, Response200])),
+     ?_assertMatch({error, {http_error, 400, "Bad Request", _ErrorMsg}},
+                   MeckAndRequest({[Response400, Response500, Response400, Response200], xml4}))
+     ].
 
-    meck:sequence(erlcloud_httpc, request, 6, [Response400, Response500, Response200]),
-    <<"OkBody">> = erlcloud_aws:aws_request(get, "host", "/", [], config()),
 
-    
-    meck:sequence(erlcloud_httpc, request, 6, [Response400, Response500, Response400, Response200]),
-    Result3 = erlcloud_aws:aws_request_xml4(get, "host", "/", [], "any", config()),
-    ?_assertMatch({error, {http_error, 400, "Bad Request", _ErrorMsg}}, Result3).
-
-request_prot_host_port_str_test(_) ->
-    ok = erlcloud_aws:aws_request(get, "http", "host1", "9999", "/path1", [], "id", "key"),
+test_request_prot_host_port_str(_) ->
+    <<"OkBody">> = erlcloud_aws:aws_request(get, "http", "host1", "9999", "/path1", [], "id", "key"),
     Url = get_url_from_history(meck:history(erlcloud_httpc)),
     test_url(http, "host1", 9999, "/path1", Url).
 
-request_prot_host_port_int_test(_) ->
-    ok = erlcloud_aws:aws_request(get, "http", "host1", 9999, "/path1", [], "id", "key"),
+test_request_prot_host_port_int(_) ->
+    <<"OkBody">> = erlcloud_aws:aws_request(get, "http", "host1", 9999, "/path1", [], "id", "key"),
     Url = get_url_from_history(meck:history(erlcloud_httpc)),
     test_url(http, "host1", 9999, "/path1", Url).
 
-get_service_status_test(_) ->
+test_get_service_status(_) ->
     StatusJsonS3 = jsx:encode(
         [{<<"archive">>,
             [[{<<"service_name">>,
@@ -134,7 +147,7 @@ get_service_status_test(_) ->
     OKStatusEmpty = erlcloud_aws:get_service_status(["sqs", "sns"]),
     meck:expect(erlcloud_httpc, request, fun(_,_,_,_,_,_) -> {ok, {{200, "OK"}, [], StatusJsonS3}} end),
     OKStatus = erlcloud_aws:get_service_status(["cloudformation", "sns", "vpc"]),
-    
+
     [?_assertEqual(proplists:get_value(<<"status">>, S3Status), 0),
      ?_assertEqual(proplists:get_value(<<"service">>, S3Status), <<"s3-eu-central-1">>),
      ?_assertEqual(proplists:get_value(<<"status">>, EC2Status), 2),
@@ -142,6 +155,31 @@ get_service_status_test(_) ->
      ?_assertEqual(OKStatusEmpty, ok),
      ?_assertEqual(OKStatus, ok)
      ].
+
+
+test_auto_config_with_env(_) ->
+    % Note: meck do not support os module
+    X_AWS_ACCESS  = os:getenv("AWS_ACCESS_KEY_ID"),
+    X_AWS_SECRET  = os:getenv("AWS_SECRET_ACCESS_KEY"),
+    X_AWS_SESSION = os:getenv("AWS_SESSION_TOKEN"),
+
+    os:putenv("AWS_ACCESS_KEY_ID", "access"),
+    os:putenv("AWS_SECRET_ACCESS_KEY", "secret"),
+    os:putenv("AWS_SESSION_TOKEN", "token"),
+    Config = erlcloud_aws:auto_config(),
+    os_rstenv("AWS_ACCESS_KEY_ID", X_AWS_ACCESS),
+    os_rstenv("AWS_SECRET_ACCESS_KEY", X_AWS_SECRET),
+    os_rstenv("AWS_SESSION_TOKEN", X_AWS_SESSION),
+
+    [?_assertMatch("access", element(#aws_config.access_key_id, element(2, Config))),
+     ?_assertMatch("secret", element(#aws_config.secret_access_key, element(2, Config))),
+     ?_assertMatch("token", element(#aws_config.security_token, element(2, Config)))
+    ].
+
+os_rstenv(Var, false) ->
+  os:unsetenv(Var);
+os_rstenv(Var, Value) ->
+  os:putenv(Var, Value).
 
 % ==================
 % Internal functions
@@ -151,7 +189,7 @@ get_url_from_history([{_, {erlcloud_httpc, request, [Url, _, _, _, _, _]}, _}]) 
     Url.
 
 test_url(ExpScheme, ExpHost, ExpPort, ExpPath, Url) ->
-    {ok, {Scheme, _UserInfo, Host, Port, Path, _Query}} = http_uri:parse(Url),
+    {ok, {Scheme, _UserInfo, Host, Port, Path, _Query}} = erlcloud_util:uri_parse(Url),
     [?_assertEqual(ExpScheme, Scheme),
      ?_assertEqual(ExpHost, Host),
      ?_assertEqual(ExpPort, Port),
@@ -199,7 +237,7 @@ profile_indirect_test_() ->
            erlcloud_aws:profile( blah ) )
        )
     }.
-    
+
 profile_indirect_role_test_() ->
     {setup, fun profiles_assume_setup/0, fun profiles_assume_cleanup/1,
      ?_test(
@@ -271,14 +309,14 @@ profile_undefined_profile_test_() ->
         ?assertMatch( {error, _}, erlcloud_aws:profile( what ) )
        )
     }.
-    
+
 profile_undefined_indirect_profile_test_() ->
     {setup, fun profiles_test_setup/0, fun profiles_test_cleanup/1,
      ?_test(
         ?assertMatch( {error, _}, erlcloud_aws:profile( whoa ) )
        )
     }.
-    
+
 
 profiles_test_setup() ->
     Profile = <<"
@@ -336,13 +374,50 @@ profiles_assume_cleanup(P) ->
     meck:unload( erlcloud_sts ).
 
 
+%% Tests that if application environment variable "erlcloud.aws_config" contains
+%% overrides for default `#aws_config{}', those overrides are indeed applied.
+default_config_override_test() ->
+    %% in case if any of previous tests have used `erlcloud_aws:configure/1'
+    _ = erase(aws_config),
+
+    %% everything still works, when the overrides are not provided
+    ?assertEqual(undefined, application:get_env(erlcloud, aws_config)),
+    ?assert(
+        is_record(erlcloud_aws:default_config(), aws_config)
+    ),
+
+    Keys = record_info(fields, aws_config),
+    KeysLen = length(Keys),
+    Nums = lists:seq(1, KeysLen),
+
+    %% reshuffling keys just to make sure that order of arguments
+    %% doesn't matter
+    {LeftKVs, RightKVs} = lists:split(
+        erlang:round(KeysLen/2), lists:zip(Keys, Nums)
+    ),
+
+    %% assigning each record's field an unique number
+    ok = application:set_env(erlcloud, aws_config, RightKVs ++ LeftKVs),
+
+    %% checking that each field was changed and has appropriate number
+    ?assertEqual(
+        [aws_config | Nums], tuple_to_list(erlcloud_aws:default_config())
+    ).
+
+
+default_config_region_sunny_test() ->
+    Region = <<"ca-central-1">>,
+    ?assertMatch(#aws_config{},
+        erlcloud_aws:default_config_region(#aws_config{}, Region)).
+
 service_config_autoscaling_test() ->
     Service = <<"autoscaling">>,
     Regions = [<<"us-east-1">>, <<"us-west-1">>, <<"us-west-2">>,
                <<"eu-west-1">>, <<"eu-central-1">>,
                <<"ap-northeast-1">>, <<"ap-northeast-2">>,
                <<"ap-southeast-1">>, <<"ap-southeast-2">>,
-               <<"sa-east-1">>],
+               <<"sa-east-1">>,
+               <<"cn-north-1">>, <<"cn-northwest-1">>],
     Expected = ["autoscaling.us-east-1.amazonaws.com",
                 "autoscaling.us-west-1.amazonaws.com",
                 "autoscaling.us-west-2.amazonaws.com",
@@ -352,7 +427,9 @@ service_config_autoscaling_test() ->
                 "autoscaling.ap-northeast-2.amazonaws.com",
                 "autoscaling.ap-southeast-1.amazonaws.com",
                 "autoscaling.ap-southeast-2.amazonaws.com",
-                "autoscaling.sa-east-1.amazonaws.com"],
+                "autoscaling.sa-east-1.amazonaws.com",
+                "autoscaling.cn-north-1.amazonaws.com.cn",
+                "autoscaling.cn-northwest-1.amazonaws.com.cn"],
     ?assertEqual( Expected,
                   [H || #aws_config{ as_host = H } <-
                             [erlcloud_aws:service_config(
@@ -366,7 +443,8 @@ service_config_cloudformation_test() ->
                <<"eu-west-1">>, <<"eu-central-1">>,
                <<"ap-northeast-1">>, <<"ap-northeast-2">>,
                <<"ap-southeast-1">>, <<"ap-southeast-2">>,
-               <<"sa-east-1">>],
+               <<"sa-east-1">>,
+               <<"cn-north-1">>, <<"cn-northwest-1">>],
     Expected = ["cloudformation.us-east-1.amazonaws.com",
                 "cloudformation.us-west-1.amazonaws.com",
                 "cloudformation.us-west-2.amazonaws.com",
@@ -376,7 +454,9 @@ service_config_cloudformation_test() ->
                 "cloudformation.ap-northeast-2.amazonaws.com",
                 "cloudformation.ap-southeast-1.amazonaws.com",
                 "cloudformation.ap-southeast-2.amazonaws.com",
-                "cloudformation.sa-east-1.amazonaws.com"],
+                "cloudformation.sa-east-1.amazonaws.com",
+                "cloudformation.cn-north-1.amazonaws.com.cn",
+                "cloudformation.cn-northwest-1.amazonaws.com.cn"],
     ?assertEqual( Expected,
                   [H || #aws_config{ cloudformation_host = H } <-
                             [erlcloud_aws:service_config(
@@ -394,7 +474,8 @@ service_config_cloudtrail_test() ->
                <<"eu-west-1">>, <<"eu-central-1">>,
                <<"ap-northeast-1">>, <<"ap-northeast-2">>,
                <<"ap-southeast-1">>, <<"ap-southeast-2">>,
-               <<"sa-east-1">>],
+               <<"sa-east-1">>,
+               <<"cn-north-1">>, <<"cn-northwest-1">>],
     Expected = ["cloudtrail.us-east-1.amazonaws.com",
                 "cloudtrail.us-west-1.amazonaws.com",
                 "cloudtrail.us-west-2.amazonaws.com",
@@ -404,7 +485,9 @@ service_config_cloudtrail_test() ->
                 "cloudtrail.ap-northeast-2.amazonaws.com",
                 "cloudtrail.ap-southeast-1.amazonaws.com",
                 "cloudtrail.ap-southeast-2.amazonaws.com",
-                "cloudtrail.sa-east-1.amazonaws.com"],
+                "cloudtrail.sa-east-1.amazonaws.com",
+                "cloudtrail.cn-north-1.amazonaws.com.cn",
+                "cloudtrail.cn-northwest-1.amazonaws.com.cn"],
     ?assertEqual( Expected,
                   [H || #aws_config{ cloudtrail_host = H } <-
                             [erlcloud_aws:service_config(
@@ -418,7 +501,8 @@ service_config_dynamodb_test() ->
                <<"eu-west-1">>, <<"eu-central-1">>,
                <<"ap-northeast-1">>, <<"ap-northeast-2">>,
                <<"ap-southeast-1">>, <<"ap-southeast-2">>,
-               <<"sa-east-1">>],
+               <<"sa-east-1">>,
+               <<"cn-north-1">>, <<"cn-northwest-1">>],
     Expected = ["dynamodb.us-east-1.amazonaws.com",
                 "dynamodb.us-west-1.amazonaws.com",
                 "dynamodb.us-west-2.amazonaws.com",
@@ -428,7 +512,9 @@ service_config_dynamodb_test() ->
                 "dynamodb.ap-northeast-2.amazonaws.com",
                 "dynamodb.ap-southeast-1.amazonaws.com",
                 "dynamodb.ap-southeast-2.amazonaws.com",
-                "dynamodb.sa-east-1.amazonaws.com"],
+                "dynamodb.sa-east-1.amazonaws.com",
+                "dynamodb.cn-north-1.amazonaws.com.cn",
+                "dynamodb.cn-northwest-1.amazonaws.com.cn"],
     ?assertEqual( Expected,
                   [H || #aws_config{ ddb_host = H } <-
                             [erlcloud_aws:service_config(
@@ -446,7 +532,8 @@ service_config_dynamodb_streams_test() ->
                <<"eu-west-1">>, <<"eu-central-1">>,
                <<"ap-northeast-1">>, <<"ap-northeast-2">>,
                <<"ap-southeast-1">>, <<"ap-southeast-2">>,
-               <<"sa-east-1">>],
+               <<"sa-east-1">>,
+               <<"cn-north-1">>, <<"cn-northwest-1">>],
     Expected = ["streams.dynamodb.us-east-1.amazonaws.com",
                 "streams.dynamodb.us-west-1.amazonaws.com",
                 "streams.dynamodb.us-west-2.amazonaws.com",
@@ -456,7 +543,9 @@ service_config_dynamodb_streams_test() ->
                 "streams.dynamodb.ap-northeast-2.amazonaws.com",
                 "streams.dynamodb.ap-southeast-1.amazonaws.com",
                 "streams.dynamodb.ap-southeast-2.amazonaws.com",
-                "streams.dynamodb.sa-east-1.amazonaws.com"],
+                "streams.dynamodb.sa-east-1.amazonaws.com",
+                "streams.dynamodb.cn-north-1.amazonaws.com.cn",
+                "streams.dynamodb.cn-northwest-1.amazonaws.com.cn"],
     ?assertEqual( Expected,
                   [H || #aws_config{ ddb_streams_host = H } <-
                             [erlcloud_aws:service_config(
@@ -469,7 +558,8 @@ service_config_ec2_test() ->
                <<"eu-west-1">>, <<"eu-central-1">>,
                <<"ap-northeast-1">>, <<"ap-northeast-2">>,
                <<"ap-southeast-1">>, <<"ap-southeast-2">>,
-               <<"sa-east-1">>],
+               <<"sa-east-1">>,
+               <<"cn-north-1">>, <<"cn-northwest-1">>],
     Expected = ["ec2.us-east-1.amazonaws.com",
                 "ec2.us-west-1.amazonaws.com",
                 "ec2.us-west-2.amazonaws.com",
@@ -479,7 +569,9 @@ service_config_ec2_test() ->
                 "ec2.ap-northeast-2.amazonaws.com",
                 "ec2.ap-southeast-1.amazonaws.com",
                 "ec2.ap-southeast-2.amazonaws.com",
-                "ec2.sa-east-1.amazonaws.com"],
+                "ec2.sa-east-1.amazonaws.com",
+                "ec2.cn-north-1.amazonaws.com.cn",
+                "ec2.cn-northwest-1.amazonaws.com.cn"],
     ?assertEqual( Expected,
                   [H || #aws_config{ ec2_host = H } <-
                             [erlcloud_aws:service_config(
@@ -493,7 +585,8 @@ service_config_elasticloadbalancing_test() ->
                <<"eu-west-1">>, <<"eu-central-1">>,
                <<"ap-northeast-1">>, <<"ap-northeast-2">>,
                <<"ap-southeast-1">>, <<"ap-southeast-2">>,
-               <<"sa-east-1">>],
+               <<"sa-east-1">>,
+               <<"cn-north-1">>, <<"cn-northwest-1">>],
     Expected = ["elasticloadbalancing.us-east-1.amazonaws.com",
                 "elasticloadbalancing.us-west-1.amazonaws.com",
                 "elasticloadbalancing.us-west-2.amazonaws.com",
@@ -503,7 +596,9 @@ service_config_elasticloadbalancing_test() ->
                 "elasticloadbalancing.ap-northeast-2.amazonaws.com",
                 "elasticloadbalancing.ap-southeast-1.amazonaws.com",
                 "elasticloadbalancing.ap-southeast-2.amazonaws.com",
-                "elasticloadbalancing.sa-east-1.amazonaws.com"],
+                "elasticloadbalancing.sa-east-1.amazonaws.com",
+                "elasticloadbalancing.cn-north-1.amazonaws.com.cn",
+                "elasticloadbalancing.cn-northwest-1.amazonaws.com.cn"],
     ?assertEqual( Expected,
                   [H || #aws_config{ elb_host = H } <-
                             [erlcloud_aws:service_config(
@@ -524,7 +619,8 @@ service_config_elasticmapreduce_test() ->
                <<"ca-central-1">>, <<"eu-west-1">>, <<"eu-central-1">>,
                <<"ap-northeast-1">>, <<"ap-northeast-2">>,
                <<"ap-southeast-1">>, <<"ap-southeast-2">>,
-               <<"sa-east-1">>],
+               <<"sa-east-1">>,
+               <<"cn-north-1">>, <<"cn-northwest-1">>],
     Expected = ["elasticmapreduce.us-east-1.amazonaws.com",
                 "elasticmapreduce.us-east-2.amazonaws.com",
                 "elasticmapreduce.us-west-1.amazonaws.com",
@@ -536,7 +632,9 @@ service_config_elasticmapreduce_test() ->
                 "elasticmapreduce.ap-northeast-2.amazonaws.com",
                 "elasticmapreduce.ap-southeast-1.amazonaws.com",
                 "elasticmapreduce.ap-southeast-2.amazonaws.com",
-                "elasticmapreduce.sa-east-1.amazonaws.com"],
+                "elasticmapreduce.sa-east-1.amazonaws.com",
+                "elasticmapreduce.cn-north-1.amazonaws.com.cn",
+                "elasticmapreduce.cn-northwest-1.amazonaws.com.cn"],
     ?assertEqual( Expected,
                   [H || #aws_config{ emr_host = H } <-
                             [erlcloud_aws:service_config(
@@ -563,13 +661,24 @@ service_config_iam_test() ->
                                Service, Region, #aws_config{} )
                              || Region <- Regions]] ).
 
+service_config_china_iam_test() ->
+    Service = <<"iam">>,
+    Regions = [<<"cn-north-1">>, <<"cn-northwest-1">>],
+    Expected = lists:duplicate( length(Regions), "iam.amazonaws.com.cn" ),
+    ?assertEqual( Expected,
+                  [H || #aws_config{ iam_host = H } <-
+                            [erlcloud_aws:service_config(
+                               Service, Region, #aws_config{} )
+                             || Region <- Regions]] ).
+
 service_config_kinesis_test() ->
     Service = <<"kinesis">>,
     Regions = [<<"us-east-1">>, <<"us-west-1">>, <<"us-west-2">>,
                <<"eu-west-1">>, <<"eu-central-1">>,
                <<"ap-northeast-1">>, <<"ap-northeast-2">>,
                <<"ap-southeast-1">>, <<"ap-southeast-2">>,
-               <<"sa-east-1">>],
+               <<"sa-east-1">>,
+               <<"cn-north-1">>, <<"cn-northwest-1">>],
     Expected = ["kinesis.us-east-1.amazonaws.com",
                 "kinesis.us-west-1.amazonaws.com",
                 "kinesis.us-west-2.amazonaws.com",
@@ -579,7 +688,9 @@ service_config_kinesis_test() ->
                 "kinesis.ap-northeast-2.amazonaws.com",
                 "kinesis.ap-southeast-1.amazonaws.com",
                 "kinesis.ap-southeast-2.amazonaws.com",
-                "kinesis.sa-east-1.amazonaws.com"],
+                "kinesis.sa-east-1.amazonaws.com",
+                "kinesis.cn-north-1.amazonaws.com.cn",
+                "kinesis.cn-northwest-1.amazonaws.com.cn"],
     ?assertEqual( Expected,
                   [H || #aws_config{ kinesis_host = H } <-
                             [erlcloud_aws:service_config(
@@ -607,7 +718,8 @@ service_config_rds_test() ->
                <<"eu-west-1">>, <<"eu-central-1">>,
                <<"ap-northeast-1">>, <<"ap-northeast-2">>,
                <<"ap-southeast-1">>, <<"ap-southeast-2">>,
-               <<"sa-east-1">>],
+               <<"sa-east-1">>,
+               <<"cn-north-1">>, <<"cn-northwest-1">>],
     Expected = ["rds.us-east-1.amazonaws.com",
                 "rds.us-west-1.amazonaws.com",
                 "rds.us-west-2.amazonaws.com",
@@ -617,7 +729,9 @@ service_config_rds_test() ->
                 "rds.ap-northeast-2.amazonaws.com",
                 "rds.ap-southeast-1.amazonaws.com",
                 "rds.ap-southeast-2.amazonaws.com",
-                "rds.sa-east-1.amazonaws.com"],
+                "rds.sa-east-1.amazonaws.com",
+                "rds.cn-north-1.amazonaws.com.cn",
+                "rds.cn-northwest-1.amazonaws.com.cn"],
     ?assertEqual( Expected,
                   [H || #aws_config{ rds_host = H } <-
                             [erlcloud_aws:service_config(
@@ -630,8 +744,8 @@ service_config_s3_test() ->
                <<"eu-west-1">>, <<"eu-central-1">>,
                <<"ap-northeast-1">>, <<"ap-northeast-2">>,
                <<"ap-southeast-1">>, <<"ap-southeast-2">>,
-               <<"sa-east-1">>,
-               <<"us-gov-west-1">>, <<"cn-north-1">>],
+               <<"sa-east-1">>, <<"us-gov-west-1">>,
+               <<"cn-north-1">>, <<"cn-northwest-1">>],
     Expected = ["s3-external-1.amazonaws.com",
                 "s3-us-west-1.amazonaws.com",
                 "s3-us-west-2.amazonaws.com",
@@ -643,7 +757,8 @@ service_config_s3_test() ->
                 "s3-ap-southeast-2.amazonaws.com",
                 "s3-sa-east-1.amazonaws.com",
                 "s3-fips-us-gov-west-1.amazonaws.com",
-                "s3.cn-north-1.amazonaws.com.cn"],
+                "s3.cn-north-1.amazonaws.com.cn",
+                "s3.cn-northwest-1.amazonaws.com.cn"],
     ?assertEqual( Expected,
                   [H || #aws_config{ s3_host = H } <-
                             [erlcloud_aws:service_config(
@@ -692,7 +807,8 @@ service_config_sns_test() ->
                <<"ap-northeast-1">>, <<"ap-northeast-2">>,
                <<"ap-southeast-1">>, <<"ap-southeast-2">>,
                <<"sa-east-1">>,
-               <<"us-gov-west-1">>, <<"cn-north-1">>],
+               <<"us-gov-west-1">>,
+               <<"cn-north-1">>, <<"cn-northwest-1">>],
     Expected = ["sns.us-east-1.amazonaws.com",
                 "sns.us-west-1.amazonaws.com",
                 "sns.us-west-2.amazonaws.com",
@@ -704,7 +820,8 @@ service_config_sns_test() ->
                 "sns.ap-southeast-2.amazonaws.com",
                 "sns.sa-east-1.amazonaws.com",
                 "sns.us-gov-west-1.amazonaws.com",
-                "sns.cn-north-1.amazonaws.com"],
+                "sns.cn-north-1.amazonaws.com.cn",
+                "sns.cn-northwest-1.amazonaws.com.cn"],
     ?assertEqual( Expected,
                   [H || #aws_config{ sns_host = H } <-
                             [erlcloud_aws:service_config(
@@ -718,8 +835,8 @@ service_config_sqs_test() ->
                <<"eu-west-1">>, <<"eu-central-1">>,
                <<"ap-northeast-1">>, <<"ap-northeast-2">>,
                <<"ap-southeast-1">>, <<"ap-southeast-2">>,
-               <<"cn-north-1">>,
-               <<"sa-east-1">>],
+               <<"sa-east-1">>,
+               <<"cn-north-1">>, <<"cn-northwest-1">>],
     Expected = ["sqs.us-east-1.amazonaws.com",
                 "sqs.us-west-1.amazonaws.com",
                 "sqs.us-west-2.amazonaws.com",
@@ -730,8 +847,9 @@ service_config_sqs_test() ->
                 "sqs.ap-northeast-2.amazonaws.com",
                 "sqs.ap-southeast-1.amazonaws.com",
                 "sqs.ap-southeast-2.amazonaws.com",
-                "sqs.cn-north-1.amazonaws.com",
-                "sqs.sa-east-1.amazonaws.com"],
+                "sqs.sa-east-1.amazonaws.com",
+                "sqs.cn-north-1.amazonaws.com.cn",
+                "sqs.cn-northwest-1.amazonaws.com.cn"],
     ?assertEqual( Expected,
                   [H || #aws_config{ sqs_host = H } <-
                             [erlcloud_aws:service_config(
@@ -747,15 +865,15 @@ service_config_sts_test() ->
                <<"eu-west-1">>, <<"eu-central-1">>,
                <<"ap-northeast-1">>, <<"ap-northeast-2">>,
                <<"ap-southeast-1">>, <<"ap-southeast-2">>,
-               <<"cn-north-1">>,
-               <<"sa-east-1">>],
+               <<"sa-east-1">>,
+               <<"cn-north-1">>, <<"cn-northwest-1">>],
     RegionsAlt = ["us-east-1", "us-west-1", "us-west-2",
                   "us-gov-west-1",
                   "eu-west-1", "eu-central-1",
                   "ap-northeast-1", "ap-northeast-2",
                   "ap-southeast-1", "ap-southeast-2",
-                  "cn-north-1",
-                  "sa-east-1"],
+                  "sa-east-1",
+                  "cn-north-1", "cn-northwest-1"],
     Expected = ["sts.us-east-1.amazonaws.com",
                 "sts.us-west-1.amazonaws.com",
                 "sts.us-west-2.amazonaws.com",
@@ -766,8 +884,9 @@ service_config_sts_test() ->
                 "sts.ap-northeast-2.amazonaws.com",
                 "sts.ap-southeast-1.amazonaws.com",
                 "sts.ap-southeast-2.amazonaws.com",
-                "sts.cn-north-1.amazonaws.com",
-                "sts.sa-east-1.amazonaws.com"],
+                "sts.sa-east-1.amazonaws.com",
+                "sts.cn-north-1.amazonaws.com.cn",
+                "sts.cn-northwest-1.amazonaws.com.cn"],
     ?assertEqual( Expected,
                   [H || #aws_config{ sts_host = H } <-
                             [erlcloud_aws:service_config(

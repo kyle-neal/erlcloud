@@ -12,22 +12,25 @@
 
          describe_load_balancer/1, describe_load_balancer/2,
 
-         describe_load_balancers/0, describe_load_balancers/1, 
+         describe_load_balancers/0, describe_load_balancers/1,
          describe_load_balancers/2, describe_load_balancers/3, describe_load_balancers/4,
          describe_load_balancers_all/0, describe_load_balancers_all/1, describe_load_balancers_all/2,
 
          configure_health_check/2, configure_health_check/3,
-         
+
          create_load_balancer_policy/3, create_load_balancer_policy/4, create_load_balancer_policy/5,
          delete_load_balancer_policy/2, delete_load_balancer_policy/3,
-         
-         describe_load_balancer_policies/0, describe_load_balancer_policies/1, 
+
+         describe_load_balancer_policies/0, describe_load_balancer_policies/1,
          describe_load_balancer_policies/2, describe_load_balancer_policies/3,
-         
-         describe_load_balancer_policy_types/0, describe_load_balancer_policy_types/1, 
+
+         describe_load_balancer_policy_types/0, describe_load_balancer_policy_types/1,
          describe_load_balancer_policy_types/2,
 
-         describe_load_balancer_attributes/1, describe_load_balancer_attributes/2]).
+         describe_load_balancer_attributes/1, describe_load_balancer_attributes/2,
+
+         describe_tags/2, describe_tags/1
+  ]).
 
 -include("erlcloud.hrl").
 -include("erlcloud_aws.hrl").
@@ -37,14 +40,19 @@
 -define(DEFAULT_MAX_RECORDS, 400).
 
 % xpath for elb descriptions used in describe_groups functions:
--define(DESCRIBE_ELBS_PATH, 
+-define(DESCRIBE_ELBS_PATH,
         "/DescribeLoadBalancersResponse/DescribeLoadBalancersResult/LoadBalancerDescriptions/member").
--define(DESCRIBE_ELBS_NEXT_TOKEN, 
-        "/DescribeLoadBalancersResponse/DescribeLoadBalancersResult/NextMarker").
--define(DESCRIBE_ELB_POLICIES_PATH, 
+-define(DESCRIBE_ELBS_NEXT_TOKEN,
+        "/DescribeLoadBalancersResponse/NextMarker").
+-define(DESCRIBE_ELB_POLICIES_PATH,
         "/DescribeLoadBalancerPoliciesResponse/DescribeLoadBalancerPoliciesResult/PolicyDescriptions/member").
--define(DESCRIBE_ELB_POLICY_TYPE_PATH, 
+-define(DESCRIBE_ELB_POLICY_TYPE_PATH,
         "/DescribeLoadBalancerPolicyTypesResponse/DescribeLoadBalancerPolicyTypesResult/PolicyTypeDescriptions/member").
+-define(DESCRIBE_ELBS_TAGS_PATH,
+        "/DescribeTagsResponse/DescribeTagsResult/TagDescriptions/member").
+
+-type result() :: {ok, term()} | {error, metadata_not_available | container_credentials_unavailable | erlcloud_aws:httpc_result_error()}.
+
 
 -import(erlcloud_xml, [get_text/2, get_integer/2, get_list/2]).
 
@@ -64,13 +72,11 @@ new(AccessKeyID, SecretAccessKey, Host) ->
 
 -spec configure(string(), string()) -> ok.
 configure(AccessKeyID, SecretAccessKey) ->
-    put(aws_config, new(AccessKeyID, SecretAccessKey)),
-    ok.
+    erlcloud_config:configure(AccessKeyID, SecretAccessKey, fun new/2).
 
 -spec configure(string(), string(), string()) -> ok.
 configure(AccessKeyID, SecretAccessKey, Host) ->
-    put(aws_config, new(AccessKeyID, SecretAccessKey, Host)),
-    ok.
+    erlcloud_config:configure(AccessKeyID, SecretAccessKey, Host, fun new/3).
 
 default_config() -> erlcloud_aws:default_config().
 
@@ -108,11 +114,11 @@ delete_load_balancer(LB, Config) when is_list(LB) ->
                        [{"LoadBalancerName", LB}]).
 
 
--spec register_instance(string(), string()) -> proplist().
+-spec register_instance(string(), string()) -> ok.
 register_instance(LB, InstanceId) ->
     register_instance(LB, InstanceId, default_config()).
 
--spec register_instance(string(), string(), aws_config()) -> proplist().
+-spec register_instance(string(), string(), aws_config()) -> ok.
 register_instance(LB, InstanceId, Config) when is_list(LB) ->
     elb_simple_request(Config,
                        "RegisterInstancesWithLoadBalancer",
@@ -120,11 +126,11 @@ register_instance(LB, InstanceId, Config) when is_list(LB) ->
                         erlcloud_aws:param_list([[{"InstanceId", InstanceId}]], "Instances.member")]).
 
 
--spec deregister_instance(string(), string()) -> proplist().
+-spec deregister_instance(string(), string()) -> ok.
 deregister_instance(LB, InstanceId) ->
     deregister_instance(LB, InstanceId, default_config()).
 
--spec deregister_instance(string(), string(), aws_config()) -> proplist().
+-spec deregister_instance(string(), string(), aws_config()) -> ok.
 deregister_instance(LB, InstanceId, Config) when is_list(LB) ->
     elb_simple_request(Config,
                        "DeregisterInstancesFromLoadBalancer",
@@ -133,13 +139,13 @@ deregister_instance(LB, InstanceId, Config) when is_list(LB) ->
 
 
 
--spec configure_health_check(string(), string()) -> proplist().
+-spec configure_health_check(string(), string()) -> ok.
 configure_health_check(LB, Target) when is_list(LB),
                                         is_list(Target) ->
     configure_health_check(LB, Target, default_config()).
 
 
--spec configure_health_check(string(), string(), aws_config()) -> proplist().
+-spec configure_health_check(string(), string(), aws_config()) -> ok.
 configure_health_check(LB, Target, Config) when is_list(LB) ->
     elb_simple_request(Config,
                        "ConfigureHealthCheck",
@@ -147,11 +153,11 @@ configure_health_check(LB, Target, Config) when is_list(LB) ->
                         {"HealthCheck.Target", Target}]).
 
 %% --------------------------------------------------------------------
-%% @doc describe_load_balancer with a specific balancer name or with a 
-%% specific configuration and specific balancer name. 
+%% @doc describe_load_balancer with a specific balancer name or with a
+%% specific configuration and specific balancer name.
 %% @end
 %% --------------------------------------------------------------------
--spec describe_load_balancer(string()) -> proplist().
+-spec describe_load_balancer(string()) -> {ok, term()} | {{paged, string()}, term()} | {error, metadata_not_available | container_credentials_unavailable | erlcloud_aws:httpc_result_error()}.
 describe_load_balancer(Name) ->
     describe_load_balancer(Name, default_config()).
 describe_load_balancer(Name, Config) ->
@@ -165,7 +171,7 @@ describe_load_balancers() ->
     describe_load_balancers([], default_config()).
 
 %% --------------------------------------------------------------------
-%% @doc describe_load_balancers with specific balancer names or with a 
+%% @doc describe_load_balancers with specific balancer names or with a
 %% specific configuration.
 %% @end
 %% --------------------------------------------------------------------
@@ -178,14 +184,14 @@ describe_load_balancers(Config = #aws_config{}) ->
 %% @doc Get descriptions of the given load balancers.
 %%      The account calling this function needs permission for the
 %%      elasticloadbalancing:DescribeLoadBalancers action.
-%% 
+%%
 %% Returns {{paged, NextPageId}, Results} if there are more than
 %% the current maximum count of results, {ok, Results} if everything
 %% fits and {error, Reason} if there was a problem.
 %% @end
 %% --------------------------------------------------------------------
--spec describe_load_balancers(list(string()), aws_config()) -> 
-                             {ok, term()} | {{paged, string()}, term()} | {error, term()}.
+-spec describe_load_balancers(list(string()), aws_config()) ->
+                             {ok, term()} | {{paged, string()}, term()} | {error, metadata_not_available | container_credentials_unavailable | erlcloud_aws:httpc_result_error()}.
 describe_load_balancers(Names, Config) ->
     describe_load_balancers(Names, ?DEFAULT_MAX_RECORDS, none, Config).
 
@@ -194,21 +200,39 @@ describe_load_balancers(Names, Config) ->
 %%      maximum number of results and optional paging offset.
 %% @end
 %% --------------------------------------------------------------------
--spec describe_load_balancers(list(string()), integer(), string() | none, aws_config()) -> 
-                             {ok, term()} | {{paged, string()}, term()} | {error, term()}.
+-spec describe_load_balancers(list(string()), integer(), string() | none, aws_config()) ->
+                             {ok, term()} | {{paged, string()}, term()} | {error, metadata_not_available | container_credentials_unavailable | erlcloud_aws:httpc_result_error()}.
 describe_load_balancers(Names, PageSize, none, Config) ->
     describe_load_balancers(Names, [{"PageSize", PageSize}], Config);
 describe_load_balancers(Names, PageSize, Marker, Config) ->
     describe_load_balancers(Names, [{"Marker", Marker}, {"PageSize", PageSize}], Config).
 
--spec describe_load_balancers(list(string()), list({string(), term()}), aws_config()) -> 
-                             {ok, term()} | {{paged, string()}, term()} | {error, term()}.
+-spec describe_load_balancers(list(string()), list({string(), term()}), aws_config()) ->
+                             {ok, term()} | {{paged, string()}, term()} | {error, metadata_not_available | container_credentials_unavailable | erlcloud_aws:httpc_result_error()}.
 describe_load_balancers(Names, Params, Config) ->
     P = member_params("LoadBalancerNames.member.", Names) ++ Params,
     case elb_query(Config, "DescribeLoadBalancers", P) of
         {ok, Doc} ->
-            Elbs = xmerl_xpath:string(?DESCRIBE_ELBS_PATH, Doc),            
+            Elbs = xmerl_xpath:string(?DESCRIBE_ELBS_PATH, Doc),
             {erlcloud_util:next_token(?DESCRIBE_ELBS_NEXT_TOKEN, Doc), [extract_elb(Elb) || Elb <- Elbs]};
+        {error, Reason} ->
+            {error, Reason}
+    end.
+
+-spec describe_tags(ElbNames) -> result() when ElbNames :: list(string()).
+describe_tags(Names) ->
+    describe_tags(Names, default_config()).
+
+-spec describe_tags(ElbNames, AwsConfig) -> result()
+    when
+    ElbNames :: list(string()),
+    AwsConfig :: aws_config().
+describe_tags(Names, Config) ->
+    P = member_params("LoadBalancerNames.member.", Names),
+    case elb_query(Config, "DescribeTags", P) of
+        {ok, Doc} ->
+            Elbs = xmerl_xpath:string(?DESCRIBE_ELBS_TAGS_PATH, Doc),
+            {ok, lists:map(fun extract_elb_tags/1, Elbs)};
         {error, Reason} ->
             {error, Reason}
     end.
@@ -221,7 +245,7 @@ describe_load_balancers_all() ->
 -spec describe_load_balancers_all(list(string()) | aws_config()) ->
     {ok, [term()]} | {error, term()}.
 describe_load_balancers_all(Config) when is_record(Config, aws_config) ->
-    describe_load_balancers_all([], default_config());
+    describe_load_balancers_all([], Config);
 describe_load_balancers_all(Names) ->
     describe_load_balancers_all(Names, default_config()).
 
@@ -234,8 +258,8 @@ describe_load_balancers_all(Names, Config) ->
                 Names, ?DEFAULT_MAX_RECORDS, Marker, Cfg
             )
         end, Config, none, []).
-    
-    
+
+
 extract_elb(Item) ->
     [
         {load_balancer_name, get_text("LoadBalancerName", Item)},
@@ -272,11 +296,11 @@ extract_listener(Item) ->
     ].
 
 %% --------------------------------------------------------------------
-%% @doc Calls describe_load_balancer_policies([], 
+%% @doc Calls describe_load_balancer_policies([],
 %%              default_configuration())
 %% @end
 %% --------------------------------------------------------------------
--spec describe_load_balancer_policies() -> 
+-spec describe_load_balancer_policies() ->
                              {ok, term()} | {error, term()}.
 describe_load_balancer_policies() ->
     describe_load_balancer_policies([], [], default_config()).
@@ -285,23 +309,23 @@ describe_load_balancer_policies() ->
 %% @doc describe_load_balancer_policies with specific config.
 %% @end
 %% --------------------------------------------------------------------
--spec describe_load_balancer_policies(aws_config()) -> 
+-spec describe_load_balancer_policies(aws_config()) ->
                              {ok, term()} | {error, term()}.
 describe_load_balancer_policies(Config = #aws_config{}) ->
     describe_load_balancer_policies([], [], Config).
 
 %% --------------------------------------------------------------------
-%% @doc describe_load_balancer_policies for specified ELB 
+%% @doc describe_load_balancer_policies for specified ELB
 %%      with specificied policy names using default config.
 %% @end
 %% --------------------------------------------------------------------
--spec describe_load_balancer_policies(string(), list() | aws_config()) -> 
+-spec describe_load_balancer_policies(string(), list() | aws_config()) ->
                              {ok, term()} | {error, term()}.
-describe_load_balancer_policies(ElbName, PolicyNames) 
+describe_load_balancer_policies(ElbName, PolicyNames)
     when is_list(ElbName),
          is_list(PolicyNames) ->
     describe_load_balancer_policies(ElbName, PolicyNames, default_config());
-describe_load_balancer_policies(PolicyNames, Config = #aws_config{}) 
+describe_load_balancer_policies(PolicyNames, Config = #aws_config{})
     when is_list(PolicyNames) ->
     describe_load_balancer_policies([], PolicyNames, Config).
 
@@ -311,7 +335,7 @@ describe_load_balancer_policies(PolicyNames, Config = #aws_config{})
 %%      with specified config.
 %% @end
 %% --------------------------------------------------------------------
--spec describe_load_balancer_policies(string(), list(), aws_config()) -> 
+-spec describe_load_balancer_policies(string(), list(), aws_config()) ->
                              {ok, term()} | {error, term()}.
 describe_load_balancer_policies(ElbName, PolicyNames, Config)
     when is_list(ElbName),
@@ -325,7 +349,7 @@ describe_load_balancer_policies(ElbName, PolicyNames, Config)
     Params = ElbNameParam ++ member_params("PolicyNames.member.", PolicyNames),
     case elb_query(Config, "DescribeLoadBalancerPolicies", Params) of
         {ok, Doc} ->
-            ElbPolicies = xmerl_xpath:string(?DESCRIBE_ELB_POLICIES_PATH, Doc),            
+            ElbPolicies = xmerl_xpath:string(?DESCRIBE_ELB_POLICIES_PATH, Doc),
             {ok, [extract_elb_policy(ElbPolicy) || ElbPolicy <- ElbPolicies]};
         {error, Reason} ->
             {error, Reason}
@@ -335,8 +359,8 @@ extract_elb_policy(Item) ->
     [
         {policy_name, get_text("PolicyName", Item)},
         {policy_type_name, get_text("PolicyTypeName", Item)},
-        {policy_attributes, 
-            [extract_policy_attribute(A) || 
+        {policy_attributes,
+            [extract_policy_attribute(A) ||
                 A <- xmerl_xpath:string("PolicyAttributeDescriptions/member", Item)]}
     ].
 
@@ -347,7 +371,7 @@ extract_policy_attribute(Item) ->
     ].
 
 %% --------------------------------------------------------------------
-%% @doc Calls describe_load_balancer_policy_types([], 
+%% @doc Calls describe_load_balancer_policy_types([],
 %%                  default_configuration())
 %% @end
 %% --------------------------------------------------------------------
@@ -355,7 +379,7 @@ describe_load_balancer_policy_types() ->
     describe_load_balancer_policy_types([], default_config()).
 
 %% --------------------------------------------------------------------
-%% @doc describe_load_balancer_policy_types() with specific 
+%% @doc describe_load_balancer_policy_types() with specific
 %% policy type names.
 %% @end
 %% --------------------------------------------------------------------
@@ -368,13 +392,13 @@ describe_load_balancer_policy_types(Config = #aws_config{}) ->
 %% @doc Get descriptions of the given load balancer policy types.
 %% @end
 %% --------------------------------------------------------------------
--spec describe_load_balancer_policy_types(list(string()), aws_config()) -> 
+-spec describe_load_balancer_policy_types(list(string()), aws_config()) ->
                              {ok, term()} | {error, term()}.
 describe_load_balancer_policy_types(PolicyTypeNames, Config) ->
     P = member_params("PolicyTypeNames.member.", PolicyTypeNames),
     case elb_query(Config, "DescribeLoadBalancerPolicyTypes", P) of
         {ok, Doc} ->
-            ElbPolicyTypes = xmerl_xpath:string(?DESCRIBE_ELB_POLICY_TYPE_PATH, Doc),            
+            ElbPolicyTypes = xmerl_xpath:string(?DESCRIBE_ELB_POLICY_TYPE_PATH, Doc),
             {ok, [extract_elb_policy_type(ElbPolicyType) || ElbPolicyType <- ElbPolicyTypes]};
         {error, Reason} ->
             {error, Reason}
@@ -384,8 +408,8 @@ extract_elb_policy_type(Item) ->
     [
         {policy_type_name, get_text("PolicyTypeName", Item)},
         {policy_type_description, get_text("Description", Item)},
-        {policy_type_attributes, 
-            [extract_policy_type_attribute(A) || 
+        {policy_type_attributes,
+            [extract_policy_type_attribute(A) ||
                 A <- xmerl_xpath:string("PolicyAttributeTypeDescriptions/member", Item)]}
     ].
 
@@ -398,13 +422,13 @@ extract_policy_type_attribute(Item) ->
         {default_value, get_text("DefaultValue", Item)}
     ].
 %% --------------------------------------------------------------------
-%% @doc Calls create_load_balancer_policy() without attributes and 
+%% @doc Calls create_load_balancer_policy() without attributes and
 %% with default aws config.
 %% @end
 %% --------------------------------------------------------------------
--spec create_load_balancer_policy(string(), string(), string()) -> 
+-spec create_load_balancer_policy(string(), string(), string()) ->
                                     ok | {error, term()}.
-create_load_balancer_policy(LB, PolicyName, PolicyTypeName) 
+create_load_balancer_policy(LB, PolicyName, PolicyTypeName)
     when is_list(LB),
          is_list(PolicyName),
          is_list(PolicyTypeName) ->
@@ -414,9 +438,9 @@ create_load_balancer_policy(LB, PolicyName, PolicyTypeName)
 %% @doc Calls create_load_balancer_policy() with default aws config.
 %% @end
 %% --------------------------------------------------------------------
--spec create_load_balancer_policy(string(), string(), string(), list({string(), string()})) -> 
+-spec create_load_balancer_policy(string(), string(), string(), list({string(), string()})) ->
                                     ok | {error, term()}.
-create_load_balancer_policy(LB, PolicyName, PolicyTypeName, Attrs) 
+create_load_balancer_policy(LB, PolicyName, PolicyTypeName, Attrs)
     when is_list(LB),
          is_list(PolicyName),
          is_list(PolicyTypeName),
@@ -428,9 +452,9 @@ create_load_balancer_policy(LB, PolicyName, PolicyTypeName, Attrs)
 %% http://docs.aws.amazon.com/ElasticLoadBalancing/latest/APIReference/API_CreateLoadBalancerPolicy.html
 %% @end
 %% --------------------------------------------------------------------
--spec create_load_balancer_policy(string(), string(), string(), list({string(), string()}), aws_config()) -> 
+-spec create_load_balancer_policy(string(), string(), string(), list({string(), string()}), aws_config()) ->
                                     ok | {error, term()}.
-create_load_balancer_policy(LB, PolicyName, PolicyTypeName, AttrList, Config) 
+create_load_balancer_policy(LB, PolicyName, PolicyTypeName, AttrList, Config)
     when is_list(LB),
          is_list(PolicyName),
          is_list(PolicyTypeName),
@@ -441,7 +465,7 @@ create_load_balancer_policy(LB, PolicyName, PolicyTypeName, AttrList, Config)
                        {"PolicyName", PolicyName},
                        {"PolicyTypeName", PolicyTypeName} |
                        erlcloud_aws:param_list([[{"AttributeName", AttrName},
-                                                 {"AttributeValue", AttrValue}] || 
+                                                 {"AttributeValue", AttrValue}] ||
                                                 {AttrName, AttrValue} <- AttrList],
                                                "PolicyAttributes.member")]),
     ok.
@@ -485,12 +509,12 @@ extract_elb_attribs(Node) ->
 %% @end
 %% --------------------------------------------------------------------
 -spec delete_load_balancer_policy(string(), string()) -> ok.
-delete_load_balancer_policy(LB, PolicyName) when is_list(LB), 
+delete_load_balancer_policy(LB, PolicyName) when is_list(LB),
                                                  is_list(PolicyName) ->
     delete_load_balancer_policy(LB, PolicyName, default_config()).
 
 %% --------------------------------------------------------------------
-%% @doc Deletes the specified policy from the specified load balancer. 
+%% @doc Deletes the specified policy from the specified load balancer.
 %% This policy must not be enabled for any listeners.
 %% @end
 %% --------------------------------------------------------------------
@@ -502,15 +526,15 @@ delete_load_balancer_policy(LB, PolicyName, Config) when is_list(LB),
                        [{"LoadBalancerName", LB},
                         {"PolicyName", PolicyName}]).
 
-%% given a list of member identifiers, return a list of 
+%% given a list of member identifiers, return a list of
 %% {key with prefix, member identifier} for use in elb calls.
-%% Example pair that could be returned in a list is 
+%% Example pair that could be returned in a list is
 %% {"LoadBalancerNames.member.1", "my-elb}.
 -spec member_params(string(), list(string())) -> list({string(), string()}).
 member_params(Prefix, MemberIdentifiers) ->
     MemberKeys = [Prefix ++ integer_to_list(I) || I <- lists:seq(1, length(MemberIdentifiers))],
     [{K, V} || {K, V} <- lists:zip(MemberKeys, MemberIdentifiers)].
- 
+
 
 describe_all(Fun, AwsConfig, Marker, Acc) ->
     case Fun(Marker, AwsConfig) of
@@ -547,3 +571,16 @@ elb_request(Config, Action, Params) ->
         {error, Reason} ->
             erlang:error({aws_error, Reason})
     end.
+
+
+extract_elb_tags(Item) ->
+  [
+    {load_balancer_name, get_text("LoadBalancerName", Item)},
+    {tags, [extract_tag(L) || L <- xmerl_xpath:string("Tags/member", Item)]}
+  ].
+
+extract_tag(Item) ->
+  [
+    {value, get_text("Value", Item)},
+    {key, get_text("Key", Item)}
+  ].

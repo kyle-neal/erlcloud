@@ -145,7 +145,7 @@ request_and_retry(RequestType, Config, Headers, Body, ShouldDecode, {attempt, At
 
 -spec client_error(pos_integer(), string(), binary()) -> {retry, term()} | {error, term()}.
 client_error(Status, StatusLine, Body) ->
-    try jsx:decode(Body) of
+    try jsx:decode(Body, [{return_maps, false}]) of
         Json ->
             Message = proplists:get_value(<<"message">>, Json, <<>>),
             case proplists:get_value(<<"__type">>, Json) of
@@ -154,6 +154,8 @@ client_error(Status, StatusLine, Body) ->
                 <<"ProvisionedThroughputExceededException">> = Type ->
                     {retry, {Type, Message}};
                 <<"ThrottlingException">> = Type ->
+                    {retry, {Type, Message}};
+                <<"LimitExceededException">> = Type ->
                     {retry, {Type, Message}};
                 Other ->
                     {error, {Other, Message}}
@@ -188,4 +190,4 @@ port_spec(firehose, #aws_config{firehose_port=Port}) ->
     [":", erlang:integer_to_list(Port)].
 
 decode(<<>>) -> [];
-decode(JSON) -> jsx:decode(JSON).
+decode(JSON) -> jsx:decode(JSON, [{return_maps, false}]).

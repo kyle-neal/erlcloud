@@ -1,13 +1,14 @@
 sudo: false
 language: erlang
 otp_release:
-  - R16B03-1
-  - 17.5
-  - 18.1
-  - 19.1
+  - 19.3
+  - 20.3
+  - 21.3
+  - 22.3
+  - 23.0
 env:
   global:
-  - MAIN_OTP=19.1
+  - MAIN_OTP=20.3
   matrix:
   - FORCE_REBAR2=true
   - FORCE_REBAR2=false PATH=$PATH:$PWD
@@ -18,7 +19,8 @@ branches:
 install:
   - make travis-install
 script:
-  - make check_warnings
+  - make warnings
+  - make check
   - make eunit
 deploy:
   skip_cleanup: true

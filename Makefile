@@ -2,7 +2,7 @@
 
 # determine which Rebar we want to be running
 REBAR2=$(shell which rebar || echo ./rebar)
-REBAR3=$(shell which rebar3)
+REBAR3=$(shell which rebar3 || echo ./rebar3)
 ifeq ($(FORCE_REBAR2),true)
  REBAR=$(REBAR2)
  REBAR_VSN=2
@@ -18,7 +18,6 @@ CHECK_FILES=\
 	ebin/*.beam
 
 CHECK_EUNIT_FILES=\
-	$(CHECK_FILES) \
 	.eunit/*.beam
 
 
@@ -42,40 +41,48 @@ else
 	$(REBAR) shell
 endif
 
-check_warnings:
+deps: get-deps
+
+check_warnings: deps
 ifeq ($(REBAR_VSN),2)
-	@echo skip checking warnings
+	@$(REBAR) compile
 else
 	@$(REBAR) as warnings compile
 endif
 
-eunit:
+warnings: deps
 ifeq ($(REBAR_VSN),2)
-	@$(REBAR) compile
+	@WARNINGS_AS_ERRORS=true $(REBAR) compile
+	@WARNINGS_AS_ERRORS=true $(REBAR) compile_only=true eunit
+else
+	@$(REBAR) as test compile
+endif
+
+eunit: deps
+ifeq ($(REBAR_VSN),2)
+	$(MAKE) compile
 	@$(REBAR) eunit skip_deps=true
 else
 	@$(REBAR) eunit
 endif
 
-check:
-ifeq ($(REBAR_VSN),2)
-	@$(REBAR) compile
-	dialyzer --verbose --no_check_plt --no_native --fullpath \
-		$(CHECK_FILES) \
-		-Wunmatched_returns \
-		-Werror_handling
-else
-	@$(REBAR) dialyzer
-endif
+.dialyzer_plt:
+	dialyzer --build_plt -r deps \
+		--apps erts kernel stdlib inets crypto public_key ssl xmerl \
+		--fullpath \
+		--output_plt .dialyzer_plt
 
-check-eunit: eunit
+check: deps
 ifeq ($(REBAR_VSN),2)
-	dialyzer --verbose --no_check_plt --no_native --fullpath \
+	$(MAKE) compile
+	@$(REBAR) compile_only=true eunit
+	$(MAKE) .dialyzer_plt
+	dialyzer --no_check_plt --fullpath \
 		$(CHECK_EUNIT_FILES) \
-		-Wunmatched_returns \
-		-Werror_handling
+		-I include \
+		--plt .dialyzer_plt
 else
-	@$(REBAR) dialyzer
+	@$(REBAR) as test dialyzer
 endif
 
 doc:

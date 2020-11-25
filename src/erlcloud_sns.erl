@@ -5,6 +5,10 @@
 -author('elbrujohalcon@inaka.net').
 
 -export([add_permission/3, add_permission/4,
+         create_platform_application/2,
+         create_platform_application/3,
+         create_platform_application/4,
+         create_platform_application/5,
          create_platform_endpoint/2, create_platform_endpoint/3,
          create_platform_endpoint/4, create_platform_endpoint/5,
          create_platform_endpoint/6,
@@ -13,6 +17,11 @@
          delete_topic/1, delete_topic/2,
          list_topics/0, list_topics/1, list_topics/2,
          list_topics_all/0, list_topics_all/1,
+         list_subscriptions/0,
+         list_subscriptions/1,
+         list_subscriptions/2,
+         list_subscriptions_all/0,
+         list_subscriptions_all/1,
          list_subscriptions_by_topic/1,
          list_subscriptions_by_topic/2,
          list_subscriptions_by_topic/3,
@@ -30,13 +39,16 @@
          set_endpoint_attributes/3,
          publish_to_topic/2, publish_to_topic/3, publish_to_topic/4,
          publish_to_topic/5, publish_to_target/2, publish_to_target/3,
-         publish_to_target/4, publish_to_target/5, publish/5, publish/6,
+         publish_to_target/4, publish_to_target/5, publish_to_phone/2,
+         publish_to_phone/3, publish_to_phone/4, publish/5, publish/6,
          list_platform_applications/0, list_platform_applications/1,
          list_platform_applications/2, list_platform_applications/3,
          confirm_subscription/1, confirm_subscription/2, confirm_subscription/3,
          confirm_subscription2/2, confirm_subscription2/3, confirm_subscription2/4,
          set_topic_attributes/3, set_topic_attributes/4,
          get_topic_attributes/1, get_topic_attributes/2,
+         set_subscription_attributes/3, set_subscription_attributes/4,
+         get_subscription_attributes/1, get_subscription_attributes/2,
          subscribe/3, subscribe/4,
          unsubscribe/1, unsubscribe/2
          ]).
@@ -99,6 +111,8 @@
 
 -type(sns_topic_attribute_name () :: 'Policy' | 'DisplayName' | 'DeliveryPolicy').
 
+-type(sns_subscription_attribute_name () :: 'DeliveryPolicy' | 'RawMessageDelivery' | 'FilterPolicy').
+
 -type(sns_subscribe_protocol_type () :: http | https | email | 'email-json' | sms | sqs | application).
 
 -export_type([sns_acl/0, sns_endpoint_attribute/0, sns_message_attributes/0,
@@ -150,6 +164,30 @@ create_platform_endpoint(PlatformApplicationArn, Token, CustomUserData, Attribut
 -spec create_platform_endpoint(string(), string(), string(), [{sns_endpoint_attribute(), string()}], string(), string()) -> string().
 create_platform_endpoint(PlatformApplicationArn, Token, CustomUserData, Attributes, AccessKeyID, SecretAccessKey) ->
     create_platform_endpoint(PlatformApplicationArn, Token, CustomUserData, Attributes, new_config(AccessKeyID, SecretAccessKey)).
+
+-spec create_platform_application(string(), string()) -> string().
+create_platform_application(Name, Platform) ->
+    create_platform_application(Name, Platform, []).
+
+-spec create_platform_application(string(), string(), [{sns_endpoint_attribute(), string()}]) -> string().
+create_platform_application(Name, Platform, Attributes) ->
+    create_platform_application(Name, Platform, Attributes, default_config()).
+
+-spec create_platform_application(string(), string(), [{sns_endpoint_attribute(), string()}], aws_config()) -> string().
+create_platform_application(Name, Platform, Attributes, Config) ->
+    Doc =
+        sns_xml_request(
+            Config, "CreatePlatformApplication",
+            [{"Name",       Name},
+             {"Platform",   Platform}
+             | encode_attributes(Attributes)
+            ]),
+    erlcloud_xml:get_text(
+        "CreatePlatformApplicationResult/PlatformApplicationArn", Doc).
+
+-spec create_platform_application(string(), string(), [{sns_endpoint_attribute(), string()}], string(), string()) -> string().
+create_platform_application(Name, Platform, Attributes, AccessKeyID, SecretAccessKey) ->
+    create_platform_application(Name, Platform, Attributes, new_config(AccessKeyID, SecretAccessKey)).
 
 
 -spec create_topic(string()) -> string().
@@ -320,6 +358,46 @@ list_topics_all(Config) ->
     list_all(fun list_topics/2, topics, Config, undefined, []).
 
 
+-spec list_subscriptions() -> proplist().
+list_subscriptions()  ->
+    list_subscriptions(default_config()).
+
+-spec list_subscriptions(string() | aws_config()) -> proplist().
+list_subscriptions(Config) when is_record(Config, aws_config) ->
+    list_subscriptions(undefined, Config);
+
+list_subscriptions(NextToken) when is_list(NextToken) ->
+    list_subscriptions(NextToken, default_config()).
+
+-spec list_subscriptions(undefined | string(), aws_config()) -> proplist().
+list_subscriptions(NextToken, Config) when is_record(Config, aws_config) ->
+    Params =
+        case NextToken of
+            undefined -> [];
+            NextToken -> [{"NextToken", NextToken}]
+        end,
+    Doc = sns_xml_request(Config, "ListSubscriptions", Params),
+    Decoded =
+        erlcloud_xml:decode(
+            [{subscriptions, "ListSubscriptionsResult/Subscriptions/member",
+                fun extract_subscription/1
+                },
+            {next_token, "ListSubscriptionsResult/NextToken", text}],
+            Doc),
+    Decoded.
+
+-spec list_subscriptions_all() -> proplist().
+list_subscriptions_all() ->
+    list_subscriptions_all(default_config()).
+
+-spec list_subscriptions_all(aws_config()) -> proplist().
+list_subscriptions_all(Config) ->
+    list_all(fun (Token, Cfg) ->
+            list_subscriptions(Token, Cfg) end,
+             subscriptions, Config, undefined, []).
+
+
+
 -spec list_subscriptions_by_topic(string()) -> proplist().
 list_subscriptions_by_topic(TopicArn) when is_list(TopicArn) ->
     list_subscriptions_by_topic(TopicArn, default_config()).
@@ -341,7 +419,7 @@ list_subscriptions_by_topic(TopicArn, NextToken, Config) when is_record(Config, 
     Doc = sns_xml_request(Config, "ListSubscriptionsByTopic", [{"TopicArn", TopicArn}| Params]),
     Decoded =
         erlcloud_xml:decode(
-            [{subsriptions, "ListSubscriptionsByTopicResult/Subscriptions/member",
+            [{subscriptions, "ListSubscriptionsByTopicResult/Subscriptions/member",
                 fun extract_subscription/1
                 },
             {next_token, "ListSubscriptionsByTopicResult/NextToken", text}],
@@ -356,7 +434,7 @@ list_subscriptions_by_topic_all(TopicArn) ->
 list_subscriptions_by_topic_all(TopicArn, Config) ->
     list_all(fun (Token, Cfg) ->
             list_subscriptions_by_topic(TopicArn, Token, Cfg) end,
-        subsriptions, Config, undefined, []).
+             subscriptions, Config, undefined, []).
 
 
 
@@ -422,16 +500,34 @@ publish_to_target(TargetArn, Message, Subject, Config) ->
 publish_to_target(TargetArn, Message, Subject, AccessKeyID, SecretAccessKey) ->
     publish_to_target(TargetArn, Message, Subject, new_config(AccessKeyID, SecretAccessKey)).
 
--spec publish(topic|target, string(), sns_message(), undefined|string(), aws_config()) -> string().
+%% TargetArn can be a phone number string, e.g. "+55 (11) 9999-7777"
+-spec publish_to_phone(string(), sns_message()) -> string().
+publish_to_phone(TargetArn, Message) ->
+    publish_to_phone(TargetArn, Message, default_config()).
+
+-spec publish_to_phone(string(), sns_message(), aws_config()) -> string().
+publish_to_phone(TargetArn, Message, Config) ->
+    publish(phone, TargetArn, Message, undefined, Config).
+
+-spec publish_to_phone(string(), sns_message(), string(), string()) -> string().
+publish_to_phone(TargetArn, Message, AccessKeyID, SecretAccessKey) ->
+    publish(phone, TargetArn, Message, undefined, new_config(AccessKeyID, SecretAccessKey)).
+
+%% @doc
+%% Publish API:
+%% [http://docs.aws.amazon.com/sns/latest/api/API_Publish.html]
+
+-spec publish(topic|target|phone, string(), sns_message(), undefined|string(), aws_config()) -> string().
 publish(Type, RecipientArn, Message, Subject, Config) ->
     publish(Type, RecipientArn, Message, Subject, [], Config).
 
--spec publish(topic|target, string(), sns_message(), undefined|string(), sns_message_attributes(), aws_config()) -> string().
+-spec publish(topic|target|phone, string(), sns_message(), undefined|string(), sns_message_attributes(), aws_config()) -> string().
 publish(Type, RecipientArn, Message, Subject, Attributes, Config) ->
     RecipientParam =
         case Type of
             topic -> [{"TopicArn", RecipientArn}];
-            target -> [{"TargetArn", RecipientArn}]
+            target -> [{"TargetArn", RecipientArn}];
+            phone -> [{"PhoneNumber", RecipientArn}]
         end,
     MessageParams =
         case Message of
@@ -457,7 +553,7 @@ publish(Type, RecipientArn, Message, Subject, Attributes, Config) ->
 
 -spec parse_event(iodata()) -> sns_event().
 parse_event(EventSource) ->
-    jsx:decode(EventSource).
+    jsx:decode(EventSource, [{return_maps, false}]).
 
 -spec get_event_type(sns_event()) -> sns_event_type().
 get_event_type(Event) ->
@@ -471,7 +567,7 @@ parse_event_message(Event) ->
     Message = proplists:get_value(<<"Message">>, Event, <<>>),
     case get_event_type(Event) of
         subscription_confirmation -> Message;
-        notification -> jsx:decode(Message)
+        notification -> jsx:decode(Message, [{return_maps, false}])
     end.
 
 -spec get_notification_attribute(binary(), sns_notification()) -> sns_application_attribute() | binary().
@@ -487,11 +583,11 @@ get_notification_attribute(Attribute, Notification) ->
 
 
 
--spec set_topic_attributes(sns_topic_attribute_name(), string(), string()) -> ok.
+-spec set_topic_attributes(sns_topic_attribute_name(), string()|binary(), string()) -> ok.
 set_topic_attributes(AttributeName, AttributeValue, TopicArn) ->
     set_topic_attributes(AttributeName, AttributeValue, TopicArn, default_config()).
 
--spec set_topic_attributes(sns_topic_attribute_name(), string(), string(), aws_config()) -> ok.
+-spec set_topic_attributes(sns_topic_attribute_name(), string()|binary(), string(), aws_config()) -> ok.
 set_topic_attributes(AttributeName, AttributeValue, TopicArn, Config)
     when is_record(Config, aws_config) ->
         sns_simple_request(Config, "SetTopicAttributes", [
@@ -500,11 +596,11 @@ set_topic_attributes(AttributeName, AttributeValue, TopicArn, Config)
             {"TopicArn", TopicArn}]).
 
 
--spec get_topic_attributes (string()) -> ok.
+-spec get_topic_attributes (string()) -> [{attributes, [{atom(), string()}]}].
 get_topic_attributes(TopicArn) ->
     get_topic_attributes(TopicArn, default_config()).
 
--spec get_topic_attributes(string(), aws_config()) -> ok.
+-spec get_topic_attributes(string(), aws_config()) -> [{attributes, [{atom(), string()}]}].
 get_topic_attributes(TopicArn, Config)
     when is_record(Config, aws_config) ->
     Params = [{"TopicArn", TopicArn}],
@@ -517,6 +613,37 @@ get_topic_attributes(TopicArn, Config)
             Doc),
     Decoded.
 
+
+
+-spec set_subscription_attributes(sns_subscription_attribute_name(), string()|binary(), string()) -> ok.
+set_subscription_attributes(AttributeName, AttributeValue, SubscriptionArn) ->
+    set_subscription_attributes(AttributeName, AttributeValue, SubscriptionArn, default_config()).
+
+-spec set_subscription_attributes(sns_subscription_attribute_name(), string()|binary(), string(), aws_config()) -> ok.
+set_subscription_attributes(AttributeName, AttributeValue, SubscriptionArn, Config)
+    when is_record(Config, aws_config) ->
+    sns_simple_request(Config, "SetSubscriptionAttributes", [
+        {"AttributeName", AttributeName},
+        {"AttributeValue", AttributeValue},
+        {"SubscriptionArn", SubscriptionArn}]).
+
+
+-spec get_subscription_attributes (string()) -> [{attributes, [{sns_subscription_attribute_name() | atom(), string()}]}].
+get_subscription_attributes(SubscriptionArn) ->
+    get_subscription_attributes(SubscriptionArn, default_config()).
+
+-spec get_subscription_attributes(string(), aws_config()) -> [{attributes, [{sns_subscription_attribute_name() | atom(), string()}]}].
+get_subscription_attributes(SubscriptionArn, Config)
+    when is_record(Config, aws_config) ->
+    Params = [{"SubscriptionArn", SubscriptionArn}],
+    Doc = sns_xml_request(Config, "GetSubscriptionAttributes", Params),
+    Decoded =
+    erlcloud_xml:decode(
+        [{attributes, "GetSubscriptionAttributesResult/Attributes/entry",
+          fun extract_attribute/1
+         }],
+        Doc),
+    Decoded.
 
 -spec subscribe(string(), sns_subscribe_protocol_type(), string()) -> Arn::string().
 subscribe(Endpoint, Protocol, TopicArn) ->
@@ -583,7 +710,15 @@ encode_attributes(Attributes) ->
              {Prefix ++ ".value",   Value} | Acc]
         end, [], lists:zip(lists:seq(1, length(Attributes)), Attributes)).
 
-encode_attribute_name(custom_user_data) -> "CustomUserData";
+encode_attribute_name(platform_credential) -> "PlatformCredential";
+encode_attribute_name(platform_principal) -> "PlatformPrincipal";
+encode_attribute_name(event_endpoint_created) -> "EventEndpointCreated";
+encode_attribute_name(event_endpoint_deleted) -> "EventEndpointDeleted";
+encode_attribute_name(event_endpoint_updated) -> "EventEndpointUpdated";
+encode_attribute_name(event_delivery_failure) -> "EventDeliveryFailure";
+encode_attribute_name(success_feedback_role_arn) -> "SuccessFeedbackRoleArn";
+encode_attribute_name(failure_feedback_role_arn) -> "FailureFeedbackRoleArn";
+encode_attribute_name(success_feedback_sample_rate) -> "SuccessFeedbackSampleRate";
 encode_attribute_name(enabled) -> "Enabled";
 encode_attribute_name(token) -> "Token".
 
@@ -638,7 +773,7 @@ sns_simple_request(Config, Action, Params) ->
 sns_xml_request(Config, Action, Params) ->
     case erlcloud_aws:aws_request_xml4(post,
                                        scheme_to_protocol(Config#aws_config.sns_scheme),
-                                       Config#aws_config.sns_host, undefined, "/",
+                                       Config#aws_config.sns_host, Config#aws_config.sns_port, "/",
                                        [{"Action", Action}, {"Version", ?API_VERSION} | Params],
                                        "sns", Config) of
         {ok, XML} -> XML;
@@ -654,7 +789,7 @@ sns_xml_request(Config, Action, Params) ->
 sns_request(Config, Action, Params) ->
     case erlcloud_aws:aws_request_xml4(post,
                                        scheme_to_protocol(Config#aws_config.sns_scheme),
-                                       Config#aws_config.sns_host, undefined, "/",
+                                       Config#aws_config.sns_host, Config#aws_config.sns_port, "/",
                                        [{"Action", Action}, {"Version", ?API_VERSION} | Params],
                                        "sns", Config) of
         {ok, _Response} -> ok;
@@ -712,7 +847,13 @@ parse_key("Token") -> token;
 parse_key("EventEndpointCreated") -> event_endpoint_created;
 parse_key("EventEndpointDeleted") -> event_endpoint_deleted;
 parse_key("EventEndpointUpdated") -> event_endpoint_updated;
-parse_key("EVentDeliveryFailure") -> event_delivery_failure;
+parse_key("EventDeliveryFailure") -> event_delivery_failure;
+
+% Subscription attribute names.
+parse_key("RawMessageDelivery") -> 'RawMessageDelivery';
+parse_key("ConfirmationWasAuthenticated") -> 'ConfirmationWasAuthenticated';
+parse_key("FilterPolicy") -> 'FilterPolicy';
+parse_key("DeliveryPolicy") -> 'DeliveryPolicy';
 parse_key(OtherKey) -> list_to_atom(string:to_lower(OtherKey)).
 
 scheme_to_protocol(S) when is_list(S) -> s2p(string:to_lower(S));

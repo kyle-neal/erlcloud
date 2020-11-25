@@ -27,7 +27,22 @@ operation_test_() ->
             fun get_bucket_lifecycle_tests/1,
             fun put_bucket_lifecycle_tests/1,
             fun delete_bucket_lifecycle_tests/1,
-            fun encode_bucket_lifecycle_tests/1
+            fun encode_bucket_lifecycle_tests/1,
+            fun list_inventory_configurations_test/1,
+            fun get_inventory_configuration_test/1,
+            fun put_bucket_inventory_test/1,
+            fun delete_bucket_inventory_test/1,
+            fun encode_inventory_test/1,
+            fun delete_objects_batch_tests/1,
+            fun delete_objects_batch_single_tests/1,
+            fun delete_objects_batch_with_err_tests/1,
+            fun delete_objects_batch_mixed_tests/1,
+            fun put_bucket_encryption_test/1,
+            fun get_bucket_encryption_test/1,
+            fun get_bucket_encryption_not_found_test/1,
+            fun delete_bucket_encryption_test/1,
+            fun hackney_proxy_put_validation_test/1,
+            fun get_bucket_and_key/1
         ]}.
 
 start() ->
@@ -49,9 +64,26 @@ httpc_expect(Response) ->
     httpc_expect(get, Response).
 
 httpc_expect(Method, Response) ->
-    fun(_Url, Method2, _Headers, _Body, _Timeout, _Config) ->
-            Method = Method2,
-            Response
+    fun(_Url, Method2, _Headers, _Body, _Timeout, _Config = #aws_config{hackney_client_options = #hackney_client_options{insecure = Insecure,
+															 proxy = Proxy,
+															 proxy_auth = Proxy_auth},
+								       http_client = Http_client}) ->
+
+            case Http_client of
+              hackney ->
+                Method = Method2,
+                Insecure = false,
+                Proxy = <<"10.10.10.10">>,
+                Proxy_auth = {<<"AAAA">>, <<"BBBB">>};
+
+              _else ->
+                Method = Method2,
+                Insecure = true,
+                Proxy = undefined,
+                Proxy_auth = undefined
+	    end,
+
+	    Response
     end.
 
 get_bucket_lifecycle_tests(_) ->
@@ -189,7 +221,9 @@ put_object_tests(_) ->
     Response = {ok, {{200, "OK"}, [{"x-amz-version-id", "version_id"}], <<>>}},
     meck:expect(erlcloud_httpc, request, httpc_expect(put, Response)),
     Result = erlcloud_s3:put_object("BucketName", "Key", "Data", config()),
-    ?_assertEqual([{version_id, "version_id"}], Result).
+    ?_assertEqual([{version_id, "version_id"}
+                  ,{"x-amz-version-id", "version_id"}
+                  ], Result).
 
 dns_compliant_name_tests(_) ->
     [?_assertEqual(true,  erlcloud_util:is_dns_compliant_name("goodname123")),
@@ -361,3 +395,436 @@ error_handling_tests(_) ->
      error_handling_redirect_error(),
      error_handling_double_redirect()
     ].
+
+%% Bucket Inventory tests
+list_inventory_configurations_test(_)->
+    Response = {ok, {{200, "OK"}, [], <<"
+        <ListInventoryConfigurationsResult xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\">
+            <InventoryConfiguration>
+               <Id>report1</Id>
+               <IsEnabled>true</IsEnabled>
+               <Destination>
+                  <S3BucketDestination>
+                     <Format>CSV</Format>
+                     <AccountId>123456789012</AccountId>
+                     <Bucket>arn:aws:s3:::destination-bucket</Bucket>
+                     <Prefix>prefix1</Prefix>
+                  </S3BucketDestination>
+               </Destination>
+               <Schedule>
+                  <Frequency>Daily</Frequency>
+               </Schedule>
+               <Filter>
+                  <Prefix>prefix/One</Prefix>
+               </Filter>
+               <IncludedObjectVersions>All</IncludedObjectVersions>
+               <OptionalFields>
+                  <Field>Size</Field>
+                  <Field>LastModifiedDate</Field>
+                  <Field>ETag</Field>
+                  <Field>StorageClass</Field>
+                  <Field>IsMultipartUploaded</Field>
+                  <Field>ReplicationStatus</Field>
+               </OptionalFields>
+            </InventoryConfiguration>
+               <InventoryConfiguration>
+               <Id>report2</Id>
+               <IsEnabled>true</IsEnabled>
+               <Destination>
+                  <S3BucketDestination>
+                     <Format>CSV</Format>
+                     <AccountId>123456789012</AccountId>
+                     <Bucket>arn:aws:s3:::bucket2</Bucket>
+                     <Prefix>prefix2</Prefix>
+                  </S3BucketDestination>
+               </Destination>
+               <Schedule>
+                  <Frequency>Daily</Frequency>
+               </Schedule>
+               <Filter>
+                  <Prefix>prefix/Two</Prefix>
+               </Filter>
+               <IncludedObjectVersions>All</IncludedObjectVersions>
+               <OptionalFields>
+                  <Field>Size</Field>
+                  <Field>LastModifiedDate</Field>
+                  <Field>ETag</Field>
+                  <Field>StorageClass</Field>
+                  <Field>IsMultipartUploaded</Field>
+                  <Field>ReplicationStatus</Field>
+               </OptionalFields>
+            </InventoryConfiguration>
+            <InventoryConfiguration>
+               <Id>report3</Id>
+               <IsEnabled>true</IsEnabled>
+               <Destination>
+                  <S3BucketDestination>
+                     <Format>CSV</Format>
+                     <AccountId>123456789012</AccountId>
+                     <Bucket>arn:aws:s3:::bucket3</Bucket>
+                     <Prefix>prefix3</Prefix>
+                  </S3BucketDestination>
+               </Destination>
+               <Schedule>
+                  <Frequency>Daily</Frequency>
+               </Schedule>
+               <Filter>
+                  <Prefix>prefix/Three</Prefix>
+               </Filter>
+               <IncludedObjectVersions>All</IncludedObjectVersions>
+               <OptionalFields>
+                  <Field>Size</Field>
+                  <Field>LastModifiedDate</Field>
+                  <Field>ETag</Field>
+                  <Field>StorageClass</Field>
+                  <Field>IsMultipartUploaded</Field>
+                  <Field>ReplicationStatus</Field>
+               </OptionalFields>
+            </InventoryConfiguration>
+            <IsTruncated>false</IsTruncated>
+        </ListInventoryConfigurationsResult>
+    ">>}},
+    ExpectedResult =
+        {ok, [
+            {inventory_configuration, [
+                [
+                    {id, "report1"},
+                    {is_enabled, "true"},
+                    {filter, [{prefix, "prefix/One"}]},
+                    {destination,
+                        [{s3_bucket_destination, [
+                            {format, "CSV"},
+                            {account_id, "123456789012"},
+                            {bucket, "arn:aws:s3:::destination-bucket"},
+                            {prefix, "prefix1"}]}]
+                    },
+                    {schedule, [{frequency, "Daily"}]},
+                    {included_object_versions, "All"},
+                    {optional_fields, [
+                        {field, [
+                            "Size",
+                            "LastModifiedDate",
+                            "ETag",
+                            "StorageClass",
+                            "IsMultipartUploaded",
+                            "ReplicationStatus"
+                        ]}
+                    ]}
+                ],
+                [
+                    {id, "report2"},
+                    {is_enabled, "true"},
+                    {filter, [{prefix, "prefix/Two"}]},
+                    {destination,
+                        [{s3_bucket_destination, [
+                            {format, "CSV"},
+                            {account_id, "123456789012"},
+                            {bucket, "arn:aws:s3:::bucket2"},
+                            {prefix, "prefix2"}]}]
+                    },
+                    {schedule, [{frequency, "Daily"}]},
+                    {included_object_versions, "All"},
+                    {optional_fields, [
+                        {field, [
+                            "Size",
+                            "LastModifiedDate",
+                            "ETag",
+                            "StorageClass",
+                            "IsMultipartUploaded",
+                            "ReplicationStatus"
+                        ]}
+                    ]}
+                ],
+                [
+                    {id, "report3"},
+                    {is_enabled, "true"},
+                    {filter, [{prefix, "prefix/Three"}]},
+                    {destination,
+                        [{s3_bucket_destination, [
+                            {format, "CSV"},
+                            {account_id, "123456789012"},
+                            {bucket, "arn:aws:s3:::bucket3"},
+                            {prefix, "prefix3"}]}]
+                    },
+                    {schedule, [{frequency, "Daily"}]},
+                    {included_object_versions, "All"},
+                    {optional_fields, [
+                        {field, [
+                            "Size",
+                            "LastModifiedDate",
+                            "ETag",
+                            "StorageClass",
+                            "IsMultipartUploaded",
+                            "ReplicationStatus"
+                        ]}
+                    ]}
+                ]
+            ]}
+        ]},
+    meck:expect(erlcloud_httpc, request, httpc_expect(Response)),
+    Result = erlcloud_s3:list_bucket_inventory("BucketName", config()),
+    ?_assertEqual(
+        ExpectedResult,
+        Result).
+
+
+get_inventory_configuration_test(_) ->
+    Response = {ok, {{200, "OK"}, [], <<"
+        <InventoryConfiguration xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\">
+           <Id>report1</Id>
+           <IsEnabled>true</IsEnabled>
+           <Filter>
+              <Prefix>filterPrefix</Prefix>
+           </Filter>
+           <Destination>
+              <S3BucketDestination>
+                 <Format>CSV</Format>
+                 <AccountId>123456789012</AccountId>
+                 <Bucket>arn:aws:s3:::destination-bucket</Bucket>
+                 <Prefix>prefix1</Prefix>
+              </S3BucketDestination>
+           </Destination>
+           <Schedule>
+              <Frequency>Daily</Frequency>
+           </Schedule>
+           <IncludedObjectVersions>All</IncludedObjectVersions>
+           <OptionalFields>
+              <Field>Size</Field>
+              <Field>LastModifiedDate</Field>
+              <Field>ETag</Field>
+              <Field>StorageClass</Field>
+              <Field>IsMultipartUploaded</Field>
+              <Field>ReplicationStatus</Field>
+           </OptionalFields>
+        </InventoryConfiguration>">>}},
+    ExpectedResult =
+        {ok, [
+            {id, "report1"},
+            {is_enabled, "true"},
+            {filter, [{prefix, "filterPrefix"}]},
+            {destination,
+                [{s3_bucket_destination, [
+                    {format, "CSV"},
+                    {account_id, "123456789012"},
+                    {bucket, "arn:aws:s3:::destination-bucket"},
+                    {prefix, "prefix1"}]}]
+            },
+            {schedule, [{frequency, "Daily"}]},
+            {included_object_versions, "All"},
+            {optional_fields, [
+                {field, [
+                    "Size",
+                    "LastModifiedDate",
+                    "ETag",
+                    "StorageClass",
+                    "IsMultipartUploaded",
+                    "ReplicationStatus"
+                ]}
+            ]}
+        ]},
+    meck:expect(erlcloud_httpc, request, httpc_expect(Response)),
+    Result = erlcloud_s3:get_bucket_inventory("BucketName", "report1", config()),
+    ?_assertEqual(
+        ExpectedResult,
+        Result).
+
+encode_inventory_test(_)->
+    ExpectedXml =
+        "<?xml version=\"1.0\"?>"
+            "<InventoryConfiguration xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\">"
+                "<Id>report1</Id>"
+                "<IsEnabled>true</IsEnabled>"
+               "<Filter>"
+                  "<Prefix>filterPrefix</Prefix>"
+               "</Filter>"
+               "<Destination>"
+                  "<S3BucketDestination>"
+                     "<Format>CSV</Format>"
+                     "<AccountId>123456789012</AccountId>"
+                     "<Bucket>arn:aws:s3:::destination-bucket</Bucket>"
+                     "<Prefix>prefix1</Prefix>"
+                  "</S3BucketDestination>"
+               "</Destination>"
+               "<Schedule>"
+                  "<Frequency>Daily</Frequency>"
+               "</Schedule>"
+               "<IncludedObjectVersions>All</IncludedObjectVersions>"
+               "<OptionalFields>"
+                  "<Field>Size</Field>"
+                  "<Field>LastModifiedDate</Field>"
+                  "<Field>ETag</Field>"
+                  "<Field>StorageClass</Field>"
+                  "<Field>IsMultipartUploaded</Field>"
+                  "<Field>ReplicationStatus</Field>"
+               "</OptionalFields>"
+            "</InventoryConfiguration>",
+    Inventory =
+        [
+            {id, "report1"},
+            {is_enabled, "true"},
+            {filter, [{prefix, "filterPrefix"}]},
+            {destination,
+                [{s3_bucket_destination, [
+                    {format, "CSV"},
+                    {account_id, "123456789012"},
+                    {bucket, "arn:aws:s3:::destination-bucket"},
+                    {prefix, "prefix1"}]}]
+            },
+            {schedule, [{frequency, "Daily"}]},
+            {included_object_versions, "All"},
+            {optional_fields, [
+                {field, [
+                    "Size",
+                    "LastModifiedDate",
+                    "ETag",
+                    "StorageClass",
+                    "IsMultipartUploaded",
+                    "ReplicationStatus"
+                ]}
+            ]}
+        ],
+    Result  = erlcloud_s3:encode_inventory(Inventory),
+    ?_assertEqual(ExpectedXml, Result).
+
+put_bucket_inventory_test(_) ->
+    Response =
+        {ok,
+            {
+                {200,"OK"},
+                [
+                    {"server","AmazonS3"},
+                    {"content-length","0"},
+                    {"date","Mon, 31 Oct 2016 12:00:00 GMT"},
+                    {"x-amz-request-id","236A8905248E5A01"},
+                    {"x-amz-id-2",
+                        "YgIPIfBiKa2bj0KMg95r/0zo3emzU4dzsD4rcKCHQUAdQkf3ShJTOOpXUueF6QKo"}
+                ],
+                <<>>
+            }
+        },
+    meck:expect(erlcloud_httpc, request, httpc_expect(put, Response)),
+    Inventory =
+        [
+            {id, "report1"},
+            {is_enabled, "true"},
+            {filter, [{prefix, "filterPrefix"}]},
+            {destination,
+                [{s3_bucket_destination, [
+                    {format, "CSV"},
+                    {account_id, "123456789012"},
+                    {bucket, "arn:aws:s3:::destination-bucket"},
+                    {prefix, "prefix1"}]}]
+            },
+            {schedule, [{frequency, "Daily"}]},
+            {included_object_versions, "All"},
+            {optional_fields, [
+                {field, [
+                    "Size",
+                    "LastModifiedDate",
+                    "ETag",
+                    "StorageClass",
+                    "IsMultipartUploaded",
+                    "ReplicationStatus"
+                ]}
+            ]}
+        ],
+    Result = erlcloud_s3:put_bucket_inventory("BucketName", Inventory, config()),
+    ?_assertEqual(ok, Result).
+
+delete_bucket_inventory_test(_) ->
+    Response =
+        {ok,
+            {
+                {204,"No Content"},
+                [
+                    {"server","AmazonS3"},
+                    {"date","Wed, 14 May 2014 02:11:22 GMT"},
+                    {"x-amz-request-id","0CF038E9BCF63097"},
+                    {"x-amz-id-2",
+                        "0FmFIWsh/PpBuzZ0JFRC55ZGVmQW4SHJ7xVDqKwhEdJmf3q63RtrvH8ZuxW1Bol5"}
+                ],
+                <<>>
+            }
+        },
+    meck:expect(erlcloud_httpc, request, httpc_expect(delete, Response)),
+    Result = erlcloud_s3:delete_bucket_inventory("BucketName", "report1", config()),
+    ?_assertEqual(ok, Result).
+
+delete_objects_batch_single_tests(_) ->
+    Response = {ok, {{200, "OK"}, [], <<"<?xml version=\"1.0\" encoding=\"UTF-8\"?><DeleteResult xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\"><Deleted><Key>sample1.txt</Key></Deleted></DeleteResult>">>}},
+    meck:expect(erlcloud_httpc, request, httpc_expect(post, Response)),
+    Result = erlcloud_s3:delete_objects_batch("BucketName",["sample1.txt"], config()),
+    ?_assertEqual([{deleted,["sample1.txt"]},{error,[]}], Result).
+
+delete_objects_batch_tests(_) ->
+    Response = {ok, {{200, "OK"}, [], <<"<?xml version=\"1.0\" encoding=\"UTF-8\"?>
+<DeleteResult xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\"><Deleted><Key>sample1.txt</Key></Deleted><Deleted><Key>sample2.txt</Key></Deleted><Deleted><Key>sample3.txt</Key></Deleted></DeleteResult>">>}},
+    meck:expect(erlcloud_httpc, request, httpc_expect(post, Response)),
+    Result = erlcloud_s3:delete_objects_batch("BucketName",["sample1.txt","sample2.txt","sample3.txt"], config()),
+    ?_assertEqual([{deleted,["sample1.txt", "sample2.txt","sample3.txt"]},{error,[]}], Result).
+
+delete_objects_batch_with_err_tests(_) ->
+    Response = {ok, {{200, "OK"}, [], <<"<?xml version=\"1.0\" encoding=\"UTF-8\"?><DeleteResult xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\"><Error><Key>sample2.txt</Key><Code>AccessDenied</Code><Message>Access Denied</Message></Error></DeleteResult>">>}},
+    meck:expect(erlcloud_httpc, request, httpc_expect(post, Response)),
+    Result = erlcloud_s3:delete_objects_batch("BucketName",["sample2.txt"], config()),
+    ?_assertEqual([{deleted,[]}, {error,[{"sample2.txt","AccessDenied","Access Denied"}]}], Result).
+
+delete_objects_batch_mixed_tests(_) ->
+    Response = {ok, {{200, "OK"}, [], <<"<?xml version=\"1.0\" encoding=\"UTF-8\"?><DeleteResult xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\"><Deleted><Key>sample1.txt</Key></Deleted><Error><Key>sample2.txt</Key><Code>AccessDenied</Code><Message>Access Denied</Message></Error></DeleteResult>">>}},
+    meck:expect(erlcloud_httpc, request, httpc_expect(post, Response)),
+    Result = erlcloud_s3:delete_objects_batch("BucketName",["sample2.txt"], config()),
+    ?_assertEqual([{deleted,["sample1.txt"]}, {error,[{"sample2.txt","AccessDenied","Access Denied"}]}], Result).
+
+put_bucket_encryption_test(_) ->
+    Response = {ok, {{201, "Created"}, [], <<>>}},
+    meck:expect(erlcloud_httpc, request, httpc_expect(put, Response)),
+    Cfg     = config(),
+    KMSKey  = "arn:aws:kms:us-east-1:1234/5678example",
+    Result1 = erlcloud_s3:put_bucket_encryption("bucket", "AES256", Cfg),
+    Result2 = erlcloud_s3:put_bucket_encryption("bucket", "aws:kms", KMSKey, Cfg),
+    [
+        ?_assertEqual(ok, Result1),
+        ?_assertEqual(ok, Result2)
+    ].
+
+get_bucket_encryption_test(_) ->
+    Response = {ok, {{200, "OK"}, [], ?S3_BUCKET_ENCRYPTION}},
+    meck:expect(erlcloud_httpc, request, httpc_expect(Response)),
+    Result = erlcloud_s3:get_bucket_encryption("bucket", config()),
+    ?_assertEqual(
+        {ok, [{sse_algorithm,     "aws:kms"},
+              {kms_master_key_id, "arn:aws:kms:us-east-1:1234/5678example"}]},
+        Result
+    ).
+
+get_bucket_encryption_not_found_test(_) ->
+    Response = {ok, {{404, "Not Found"}, [], ?S3_BUCKET_ENCRYPTION_NOT_FOUND}},
+    meck:expect(erlcloud_httpc, request, httpc_expect(Response)),
+    Result = erlcloud_s3:get_bucket_encryption("bucket", config()),
+    ?_assertEqual(
+        {error, {http_error, 404, "Not Found", ?S3_BUCKET_ENCRYPTION_NOT_FOUND}},
+        Result
+    ).
+
+delete_bucket_encryption_test(_) ->
+    Response = {ok, {{204, "No Content"}, [], <<>>}},
+    meck:expect(erlcloud_httpc, request, httpc_expect(delete, Response)),
+    Result = erlcloud_s3:delete_bucket_encryption("bucket", config()),
+    ?_assertEqual(ok, Result).
+
+hackney_proxy_put_validation_test(_) ->
+    Response = {ok, {{200, "OK"}, [{"x-amz-version-id", "version_id"}], <<>>}},
+    Config2 = #aws_config{hackney_client_options = #hackney_client_options{insecure = false,
+			   proxy = <<"10.10.10.10">>,
+			   proxy_auth = {<<"AAAA">>, <<"BBBB">>}},
+			  http_client = hackney},
+    meck:expect(erlcloud_httpc, request, httpc_expect(put, Response)),
+    Result = erlcloud_s3:put_object("BucketName", "Key", "Data", config(Config2)),
+    ?_assertEqual([{version_id, "version_id"}
+                  ,{"x-amz-version-id", "version_id"}
+                  ], Result).
+
+get_bucket_and_key(_) ->
+    ErlcloudS3ExportExample = "https://s3.amazonaws.com/some_bucket/path_to_file",
+    Result = erlcloud_s3:get_bucket_and_key(ErlcloudS3ExportExample),
+    ?_assertEqual({"some_bucket","path_to_file"}, Result).

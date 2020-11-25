@@ -72,7 +72,7 @@
 
 -export_type([json_return/0, attempt/0, retry_fun/0]).
 
--type json_return() :: {ok, jsx:json_term()} | {error, term()}.
+-type json_return() :: ok | {ok, jsx:json_term()} | {error, term()}.
 
 -type operation() :: string().
 -spec request(aws_config(), operation(), jsx:json_term()) -> json_return().
@@ -178,7 +178,7 @@ retry_v1_wrap(Error, RetryFun) ->
 
 -type headers() :: [{string(), string()}].
 -spec request_and_retry(aws_config(), headers(), jsx:json_text(), attempt()) ->
-                               {ok, jsx:json_term()} | {error, term()}.
+                               ok | {ok, jsx:json_term()} | {error, term()}.
 request_and_retry(_, _, _, {error, Reason}) ->
     {error, Reason};
 request_and_retry(Config, Headers, Body, {attempt, Attempt}) ->
@@ -188,9 +188,12 @@ request_and_retry(Config, Headers, Body, {attempt, Attempt}) ->
            [{<<"content-type">>, <<"application/x-amz-json-1.0">>} | Headers],
            Body, timeout(Attempt, Config), Config) of
 
+        {ok, {{200, _}, _, <<>>}} ->
+            ok;
+
         {ok, {{200, _}, _, RespBody}} ->
             %% TODO check crc
-            {ok, jsx:decode(RespBody)};
+            {ok, jsx:decode(RespBody, [{return_maps, false}])};
 
         Error ->
             DDBError = #ddb2_error{attempt = Attempt, 
@@ -227,7 +230,7 @@ client_error(Body, DDBError) ->
         false ->
             DDBError#ddb2_error{error_type = http, should_retry = false};
         true ->
-            Json = jsx:decode(Body),
+            Json = jsx:decode(Body, [{return_maps, false}]),
             case proplists:get_value(<<"__type">>, Json) of
                 undefined ->
                     DDBError#ddb2_error{error_type = http, should_retry = false};
@@ -237,11 +240,19 @@ client_error(Body, DDBError) ->
                         [_, Type] when
                               Type =:= <<"ProvisionedThroughputExceededException">> orelse
                               Type =:= <<"ThrottlingException">> ->
-                            DDBError#ddb2_error{error_type = ddb, 
+                            DDBError#ddb2_error{error_type = ddb,
                                                 should_retry = true,
                                                 reason = {Type, Message}};
+                        [_, Type] when
+                              Type =:= <<"TransactionCanceledException">> ->
+                            CancellationReasons0 = proplists:get_value(<<"CancellationReasons">>, Json, []),
+                            CancellationReasons = [{proplists:get_value(<<"Code">>, R),
+                                                    proplists:get_value(<<"Message">>, R, null)} || R <- CancellationReasons0],
+                            DDBError#ddb2_error{error_type = ddb,
+                                                should_retry = should_retry_canceled_transaction(CancellationReasons),
+                                                reason = {Type, {Message, CancellationReasons}}};
                         [_, Type] ->
-                            DDBError#ddb2_error{error_type = ddb, 
+                            DDBError#ddb2_error{error_type = ddb,
                                                 should_retry = false,
                                                 reason = {Type, Message}};
                         _ ->
@@ -265,3 +276,10 @@ port_spec(#aws_config{ddb_port=80}) ->
 port_spec(#aws_config{ddb_port=Port}) ->
     [":", erlang:integer_to_list(Port)].
 
+-spec should_retry_canceled_transaction(proplists:proplist()) -> boolean().
+should_retry_canceled_transaction(CancellationReasons) ->
+    %% Retry canceled transaction if cancellation reasons are either:
+    %% `None', `ThrottlingError' and/or `ProvisionedThroughputExceeded'
+    lists:filter(fun({Reason, _Message}) ->
+                     not lists:member(Reason, [<<"None">>, <<"ThrottlingError">>, <<"ProvisionedThroughputExceeded">>])
+                 end, CancellationReasons) == [].

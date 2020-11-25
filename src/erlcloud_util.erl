@@ -1,17 +1,55 @@
 -module(erlcloud_util).
--export([sha_mac/2, sha256_mac/2, md5/1, sha256/1,rand_uniform/1,
-         is_dns_compliant_name/1,
-         query_all/4, query_all/5, query_all_token/4, make_response/2, 
-         get_items/2, to_string/1, encode_list/2, next_token/2]).
+
+-export([
+    sha_mac/2,
+    sha256_mac/2,
+    md5/1,
+    sha256/1,
+    rand_uniform/1,
+    is_dns_compliant_name/1,
+    query_all/4, query_all/5,
+    query_all_token/4,
+    make_response/2,
+    get_items/2,
+    to_string/1,
+    encode_list/2,
+    encode_object/2,
+    encode_object_list/2,
+    next_token/2,
+    filter_undef/1,
+    uri_parse/1,
+    http_uri_decode/1,
+    http_uri_encode/1
+]).
 
 -define(MAX_ITEMS, 1000).
 
+-ifdef(OTP_RELEASE).
+-if(?OTP_RELEASE >= 23).
+sha_mac(K, S) ->
+    crypto:mac(hmac, sha, K, S).
+-else.
 sha_mac(K, S) ->
     crypto:hmac(sha, K, S).
+-endif.
+-else.
+sha_mac(K, S) ->
+    crypto:hmac(sha, K, S).
+-endif.
 
 
+-ifdef(OTP_RELEASE).
+-if(?OTP_RELEASE >= 23).
+sha256_mac(K, S) ->
+    crypto:mac(hmac, sha256, K, S).
+-else.
 sha256_mac(K, S) ->
     crypto:hmac(sha256, K, S).
+-endif.
+-else.
+sha256_mac(K, S) ->
+    crypto:hmac(sha256, K, S).
+-endif.
 
 sha256(V) ->
     crypto:hash(sha256, V).
@@ -94,10 +132,38 @@ query_all(QueryFun, Config, Action, Params, MaxItems, Marker, Acc) ->
             Error
     end.
 
+-spec encode_list(string(), [term()]) ->
+    proplists:proplist().
 encode_list(ElementName, Elements) ->
     Numbered = lists:zip(lists:seq(1, length(Elements)), Elements),
     [{ElementName ++ ".member." ++ integer_to_list(N), Element} ||
         {N, Element} <- Numbered].
+
+-spec encode_object(string(), proplists:proplist()) ->
+    proplists:proplist().
+encode_object(ElementName, ElementParameters) ->
+    lists:map(
+        fun({Key, Value}) ->
+            {ElementName ++ "." ++ Key, Value}
+        end,
+        ElementParameters
+    ).
+
+-spec encode_object_list(string(), [proplists:proplist()]) ->
+    proplists:proplist().
+encode_object_list(Prefix, ElementParameterList) ->
+    lists:flatten(lists:foldl(
+        fun(ElementMap, Acc) ->
+            [lists:map(
+                fun({Key, Value}) ->
+                    {Prefix ++ ".member." ++ integer_to_list(length(Acc)+1) ++ "." ++ Key, Value}
+                end,
+                ElementMap
+            ) | Acc]
+        end,
+        [],
+        ElementParameterList
+    )).
 
 make_response(Xml, Result) ->
     IsTruncated = erlcloud_xml:get_bool("/*/*/IsTruncated", Xml),
@@ -128,3 +194,55 @@ next_token(Path, XML) ->
             ok
     end.
 
+-spec filter_undef(proplists:proplist()) -> proplists:proplist().
+filter_undef(List) ->
+    lists:filter(fun({_Name, Value}) -> Value =/= undefined end, List).
+
+-ifdef(OTP_RELEASE).
+-if(?OTP_RELEASE >= 23).
+uri_parse(Uri) ->
+    URIMap = uri_string:parse(Uri),
+    DefaultScheme = "https",
+    DefaultPort = 443,
+    Scheme = list_to_atom(maps:get(scheme, URIMap, DefaultScheme)),
+    UserInfo = maps:get(userinfo, URIMap, ""),
+    Host = maps:get(host, URIMap, ""),
+    Port = maps:get(port, URIMap, DefaultPort),
+    Path = maps:get(path, URIMap, ""),
+    Query = maps:get(query, URIMap, ""),
+    {ok, {Scheme, UserInfo, Host, Port, Path, Query}}.
+-else.
+uri_parse(Uri) ->
+    http_uri:parse(Uri).
+-endif.
+-else.
+uri_parse(Uri) ->
+    http_uri:parse(Uri).
+-endif.
+
+-ifdef(OTP_RELEASE).
+-if(?OTP_RELEASE >= 23).
+http_uri_decode(HexEncodedURI) ->
+    [{URI, true}] = uri_string:dissect_query(HexEncodedURI),
+    URI.
+-else.
+http_uri_decode(HexEncodedURI) ->
+    http_uri:decode(HexEncodedURI).
+-endif.
+-else.
+http_uri_decode(HexEncodedURI) ->
+    http_uri:decode(HexEncodedURI).
+-endif.
+
+-ifdef(OTP_RELEASE).
+-if(?OTP_RELEASE >= 23).
+http_uri_encode(URI) ->
+    uri_string:compose_query([{URI, true}]).
+-else.
+http_uri_encode(URI) ->
+    http_uri:encode(URI).
+-endif.
+-else.
+http_uri_encode(URI) ->
+    http_uri:encode(URI).
+-endif.
