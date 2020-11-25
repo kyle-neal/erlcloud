@@ -229,7 +229,7 @@ list_shards(StreamName, Config) when is_record(Config, aws_config), is_binary(St
 list_shards(Options, Config) when is_record(Config, aws_config), is_list(Options) ->
     case dynamize_options(Options) of
         DynamizedOptions when is_list(DynamizedOptions) ->
-            erlcloud_kinesis_impl:request(Config, "Kinesis_20131202.ListShards", DynamizedOptions);
+            erlcloud_kinesis_impl:request(kinesis, Config, "Kinesis_20131202.ListShards", DynamizedOptions);
         Error ->
             Error
     end;
@@ -392,7 +392,7 @@ describe_stream_summary(StreamName) ->
 -spec describe_stream_summary(binary(), aws_config()) -> erlcloud_kinesis_impl:json_return().
 describe_stream_summary(StreamName, Config) when is_record(Config, aws_config) ->
     Json = [{<<"StreamName">>, StreamName}],
-    erlcloud_kinesis_impl:request(Config, "Kinesis_20131202.DescribeStreamSummary", Json).
+    erlcloud_kinesis_impl:request(kinesis, Config, "Kinesis_20131202.DescribeStreamSummary", Json).
 
 %%------------------------------------------------------------------------------
 %% @doc
@@ -429,7 +429,7 @@ enable_enhanced_monitoring(StreamName, Metrics) when is_list(Metrics) ->
 enable_enhanced_monitoring(StreamName, Metrics, Config)
         when is_record(Config, aws_config), is_list(Metrics) ->
     Json = [{<<"StreamName">>, StreamName}, {<<"ShardLevelMetrics">>, Metrics}],
-    erlcloud_kinesis_impl:request(Config, "Kinesis_20131202.EnableEnhancedMonitoring", Json).
+    erlcloud_kinesis_impl:request(kinesis, Config, "Kinesis_20131202.EnableEnhancedMonitoring", Json).
 
 %%------------------------------------------------------------------------------
 %% @doc
@@ -465,7 +465,7 @@ disable_enhanced_monitoring(StreamName, Metrics) when is_list(Metrics) ->
 disable_enhanced_monitoring(StreamName, Metrics, Config)
         when is_record(Config, aws_config), is_list(Metrics)  ->
     Json = [{<<"StreamName">>, StreamName}, {<<"ShardLevelMetrics">>, Metrics}],
-    erlcloud_kinesis_impl:request(Config, "Kinesis_20131202.DisableEnhancedMonitoring", Json).
+    erlcloud_kinesis_impl:request(kinesis, Config, "Kinesis_20131202.DisableEnhancedMonitoring", Json).
 
 %%------------------------------------------------------------------------------
 %% @doc
